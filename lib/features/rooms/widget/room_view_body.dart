@@ -1,612 +1,350 @@
+import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/svg.dart';
 import 'package:svgaplayer_flutter/player.dart';
 import 'package:zego_uikit_prebuilt_live_audio_room/zego_uikit_prebuilt_live_audio_room.dart';
-import '../../../core/Utils/app_colors.dart';
 import '../../../core/Utils/app_images.dart';
 import '../../../models/gift_model.dart';
 import 'constant.dart';
 import 'package:zego_uikit/zego_uikit.dart';
 
-class RoomViewBody extends StatefulWidget{
+class RoomViewBody extends StatefulWidget {
   final String roomID;
   final bool isHost;
-  final String username;
-  final String userid;
+  final String username; // display name
+  final String userid;   // firebase UID
   final layoutMode = LayoutMode.defaultLayout;
-   RoomViewBody({Key? key, required this.roomID,required this.isHost,required this.username,required this.userid}) : super(key: key);
-  _RoomViewBody createState()=>_RoomViewBody();
+
+  const RoomViewBody({
+    Key? key,
+    required this.roomID,
+    required this.isHost,
+    required this.username,
+    required this.userid,
+  }) : super(key: key);
+
+  @override
+  _RoomViewBody createState() => _RoomViewBody();
 }
 
 class _RoomViewBody extends State<RoomViewBody> {
   static const Color _gold = Color(0xFFFFD700);
-  bool openchat=true;
-  List<int> lockedSeats = []; // List to store locked seat indexes
-  List<String> userSeats=[];
+
+  List<int> lockedSeats = [];
+  List<String> userSeats = [];
+
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  String framePhoto="";
-  final isSeatClosedNotifier = ValueNotifier<bool>(false);
+
+  String framePhoto = "";
   final isRequestingNotifier = ValueNotifier<bool>(false);
   final controller = ZegoLiveAudioRoomController();
-  List<String> musicPath=[];
-  List<String> musicname=[];
+
+  List<String> musicPath = [];
+  List<String> musicname = [];
   DateTime? seatOccupiedTime;
-  bool viewMusic=false;
-  String viewID="";
-  String bio="";
-  String layoutSeats="";
-  String wallpaper="https://firebasestorage.googleapis.com/v0/b/hayaa-161f5.appspot.com/o/rooms%2Fclose-up-microphone-pop-filter-studio.jpg?alt=media&token=c9014900-dba7-4e7c-80c4-8d9fc6055462";
-  List<FocusNode> _focusNodes = List.generate(6, (index) => FocusNode());
-  List<TextEditingController> _controllers = List.generate(6, (index) => TextEditingController());
-  String pass="";
-  String giftMedia="";
-  String carMedia="";
-  String cartype="";
-  String gifttype="";
-  String myType="";
-  String MytypeInRoom="";
-  String roomOwnerUID="";
-  String lock="lib/core/Utils/assets/images/icon/lock_8497362.png";
+
+  String viewID = "";
+  String bio = "";
+  String layoutSeats = "";
+  String wallpaper =
+      "https://firebasestorage.googleapis.com/v0/b/hayaa-161f5.appspot.com/o/rooms%2Fclose-up-microphone-pop-filter-studio.jpg?alt=media&token=c9014900-dba7-4e7c-80c4-8d9fc6055462";
+
+  final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
+  final List<TextEditingController> _passControllers =
+      List.generate(6, (_) => TextEditingController());
+
+  String pass = "";
+  String giftMedia = "";
+  String carMedia = "";
+  String cartype = "";
+  String gifttype = "";
+  String myType = "";
+  String MytypeInRoom = "";
+  String roomOwnerUID = "";
+  String mycoin = "";
+  String myexp = "";
+  String myfamily = "";
+
+  // Stream subscriptions for proper cleanup
+  StreamSubscription? _roomSub;
+  StreamSubscription? _userSub;
+  StreamSubscription? _blockSub;
+  StreamSubscription? _myUserSub;
+
   @override
   void initState() {
     super.initState();
-    setUserInRoom();
-    getMyCar();
-    getWallpaper();
-    UserBlock();
+    _listenUserInRoom();
+    _listenRoomData();
+    _listenMyUserData();
+    _listenBlock();
   }
-  void setUserInRoom()async{
-    await for(var snap in _firestore.collection('room').doc(widget.roomID).collection('user').doc(_auth.currentUser!.uid).snapshots()){
-      setState(() {
-        MytypeInRoom=snap.get('type');
-      });
+
+  @override
+  void dispose() {
+    _roomSub?.cancel();
+    _userSub?.cancel();
+    _blockSub?.cancel();
+    _myUserSub?.cancel();
+    for (var n in _focusNodes) {
+      n.dispose();
     }
+    for (var c in _passControllers) {
+      c.dispose();
+    }
+    super.dispose();
   }
-  void getMyCar()async{
-    await for(var snap in _firestore.collection('user').doc(_auth.currentUser!.uid).snapshots()){
-      setState(() {
-        myType=snap.get('type');
-      });
-      await for(var snapp in _firestore.collection('store').doc(snap.get('mycar')).snapshots()){
-        setState(() {
-          carMedia=snapp.get('photo');
-           cartype=snapp.get('type');
-          _firestore.collection('room').doc(widget.roomID).update({
-            'car':carMedia,
-            'cartype':cartype,
+
+  void _listenUserInRoom() {
+    _userSub = _firestore
+        .collection('room')
+        .doc(widget.roomID)
+        .collection('user')
+        .doc(_auth.currentUser!.uid)
+        .snapshots()
+        .listen((snap) {
+      if (snap.exists && mounted) {
+        setState(() => MytypeInRoom = snap.get('type') ?? '');
+      }
+    });
+  }
+
+  void _listenMyUserData() {
+    _myUserSub = _firestore
+        .collection('user')
+        .doc(_auth.currentUser!.uid)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      setState(() => myType = snap.get('type') ?? '');
+      final mycar = snap.get('mycar') ?? '';
+      if (mycar.isNotEmpty) {
+        _firestore.collection('store').doc(mycar).get().then((storeSnap) {
+          if (!storeSnap.exists || !mounted) return;
+          final photo = storeSnap.get('photo') ?? '';
+          final type = storeSnap.get('type') ?? '';
+          if (photo.isEmpty) return;
+          setState(() {
+            carMedia = photo;
+            cartype = type;
           });
-          Future.delayed(const Duration(seconds: 4)).then((value){
-            setState(() {
-              carMedia="";
-            });
+          _firestore.collection('room').doc(widget.roomID).update({
+            'car': photo,
+            'cartype': type,
+          });
+          Future.delayed(const Duration(seconds: 4), () {
+            if (!mounted) return;
             _firestore.collection('room').doc(widget.roomID).update({
-              'car':'',
-              'cartype':''
-            }).then((value){
-              controller.message.send('Join to Room');
+              'car': '',
+              'cartype': '',
             });
+            setState(() => carMedia = '');
+            controller.message.send('انضم إلى الغرفة');
           });
         });
       }
-    }
+    });
   }
-  void getWallpaper()async{
-    await for(var snap in _firestore.collection('room').doc(widget.roomID).snapshots()){
+
+  void _listenRoomData() {
+    _roomSub = _firestore
+        .collection('room')
+        .doc(widget.roomID)
+        .snapshots()
+        .listen((snap) {
+      if (!snap.exists || !mounted) return;
       setState(() {
-        wallpaper=snap.get('wallpaper');
-        viewID=snap.get('id');
-        bio=snap.get('bio');
-        layoutSeats=snap.get('seat');
-        pass=snap.get('password');
-        giftMedia=snap.get('gift');
-        carMedia=snap.get('car');
-        roomOwnerUID=snap.get('owner');
+        wallpaper = snap.get('wallpaper') ?? wallpaper;
+        viewID = snap.get('id') ?? '';
+        bio = snap.get('bio') ?? '';
+        layoutSeats = snap.get('seat') ?? '9';
+        pass = snap.get('password') ?? '';
+        giftMedia = snap.get('gift') ?? '';
+        gifttype = snap.get('gifttype') ?? '';
+        carMedia = snap.get('car') ?? '';
+        cartype = snap.get('cartype') ?? '';
+        roomOwnerUID = snap.get('owner') ?? '';
       });
-    }
+    });
   }
-  void UserBlock()async{
-    if(MytypeInRoom!="owner"){
-      await for(var snap in _firestore.collection('room').doc(widget.roomID).collection('block').where('id',isEqualTo: _auth.currentUser!.uid).snapshots()){
-        if(snap.size!=0){
-          controller.leave(context,showConfirmation: false);
-        }
+
+  void _listenBlock() {
+    _blockSub = _firestore
+        .collection('room')
+        .doc(widget.roomID)
+        .collection('block')
+        .where('id', isEqualTo: _auth.currentUser!.uid)
+        .snapshots()
+        .listen((snap) {
+      if (snap.size != 0 && MytypeInRoom != "owner" && mounted) {
+        controller.leave(context, showConfirmation: false);
       }
-    }
+    });
   }
+
+  bool get _isPrivileged =>
+      MytypeInRoom == "owner" ||
+      MytypeInRoom == "admin" ||
+      _auth.currentUser!.uid == roomOwnerUID;
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
-      stream: _firestore.collection('user').where(
-          'doc', isEqualTo: _auth.currentUser!.uid).snapshots(),
+      stream: _firestore
+          .collection('user')
+          .where('doc', isEqualTo: _auth.currentUser!.uid)
+          .snapshots(),
       builder: (context, snapshot) {
-        String Mycar = "";
-        String Myframe = "";
-        String Mywallpaper = "";
         if (!snapshot.hasData) {
-          return const Center(
-            child: CircularProgressIndicator(
-              backgroundColor: Colors.blue,
-            ),
-          );
+          return const Center(child: CircularProgressIndicator());
         }
-        final masseges = snapshot.data?.docs;
-        for (var massege in masseges!.reversed) {
-          Mycar = massege.get('mycar');
-          Myframe = massege.get('myframe');
+        String Myframe = "";
+        for (var doc in snapshot.data!.docs) {
+          Myframe = doc.get('myframe') ?? '';
         }
+
         return StreamBuilder<QuerySnapshot>(
-            stream: _firestore.collection('store').where('id',isEqualTo: Myframe).snapshots(),
-            builder: (context,snapshot){
-              
-              if (!snapshot.hasData) {
-                return const Center(
-                  child: CircularProgressIndicator(
-                    backgroundColor: Colors.blue,
-                  ),
-                );
-              }
-              final masseges = snapshot.data?.docs;
-              for (var massege in masseges!.reversed){
-                framePhoto=massege.get('photo');
-              }
-              return  SafeArea(
-                  child: ZegoUIKitPrebuiltLiveAudioRoom(
-                      appID: 911296599,
-                      // Fill in the appID that you get from ZEGOCLOUD Admin Console.
-                      appSign: "6fbf17123e3533d8779f74cf45de647605d854ff8737fd4d2c9bc5b22f14edcb",
-                      // Fill in the appSign that you get from ZEGOCLOUD Admin Console.
-                      userID: widget.username,
-                      userName: widget.userid,
-                      roomID: viewID,
-                      config: widget.isHost
-                          ? ZegoUIKitPrebuiltLiveAudioRoomConfig.host()
-                          : ZegoUIKitPrebuiltLiveAudioRoomConfig.audience()
-                      ..onLeaveConfirmation=(context)async {
-                        return await showDialog(
-                            context: context,
-                            builder: (BuildContext context){
-                              return AlertDialog(
-                                backgroundColor: Colors.blue[900]!.withOpacity(0.9),
-                                title: const Text("Leave Confirm",
-                                    style: TextStyle(color: Colors.white70)),
-                                content: const Text(
-                                    "Are you sure Leave from room",
-                                    style: TextStyle(color: Colors.white70)),
-                                actions: [
-                                  ElevatedButton(
-                                    child: const Text("Cancel",),
-                                    onPressed: () => Navigator.of(context).pop(false),
-                                  ),
-                                  ElevatedButton(
-                                    child: const Text("Exit"),
-                                    onPressed: () async{
-                                      _firestore.collection('room').doc(widget.roomID).collection('user').doc(_auth.currentUser!.uid).delete().then((value){
-                                        Navigator.of(context).pop(true);
-                                      });
-                                      },
-                                  ),
-                                ],
-                              );
-                            }
-                        );
-                      }
-                        ..background = background()
-                        ..takeSeatIndexWhenJoining =
-                        widget.isHost ? getHostSeatIndex() : -1
-                        ..hostSeatIndexes = [0]
-                        ..useSpeakerWhenJoining=true
-                        ..onMemberListMoreButtonPressed=onMemberListMoreButtonPressed
-                        ..seatConfig=ZegoLiveAudioRoomSeatConfig(
-                          backgroundBuilder: (context, size, user, extraInfo) {
-                            return Container(color: Colors.transparent);
-                          },
-                          foregroundBuilder: (_, size, user, extraInfo) {
-                            final int seatIndex = extraInfo['seat_index'] ?? 0;
-                            final bool isLocked = extraInfo['seat_status'] == 2;
-                            final bool isEmpty = user == null;
-
-                            return GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () {
-                                _handleSeatTap(seatIndex, user, isLocked);
-                              },
-                              child: SizedBox(
-                                width: size.width,
-                                height: size.height,
-                                child: isEmpty
-                                    ? Column(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          if (isLocked)
-                                            Icon(Icons.lock,
-                                                color: const Color(0xFF888888),
-                                                size: size.width * 0.3),
-                                          if (!isLocked)
-                                            Text(
-                                              '$seatIndex',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                        ],
-                                      )
-                                    : const SizedBox.shrink(),
-                              ),
-                            );
-                          },
-                          closeIcon: null,
-                          openIcon: null,
-                        )
-                        ..seatConfig.avatarBuilder=(context, size, user, extraInfo) {
-                          if(user!.id==_auth.currentUser!.uid){
-                            return Stack(
-                              children: [
-                                Container(
-                                  width: size.width*2,
-                                  child: CircleAvatar(
-                                    maxRadius: size.width+100,
-                                    backgroundImage: CachedNetworkImageProvider(framePhoto),
-                                    backgroundColor: Colors.transparent,
-                                  ),
-                                ),
-                                // Display the second image on the right
-                                Center(
-                                  child: Container(
-                                    width: size.width-20-3.5,
-                                    child: CircleAvatar(
-                                      backgroundImage: CachedNetworkImageProvider(_auth.currentUser!.photoURL.toString() ),
-                                      backgroundColor: Colors.transparent,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          }
-                          else{
-                            return StreamBuilder<QuerySnapshot>(
-                              stream: _firestore.collection('user').where('doc',isEqualTo: user!.id).snapshots(),
-                              builder: (context,snapshot){
-                                String userPhoto="";
-                                String userFrame="";
-                                if (!snapshot.hasData) {
-                                  return const Center(
-                                    child: CircularProgressIndicator(
-                                      backgroundColor: Colors.blue,
-                                    ),
-                                  );
-                                }
-                                final masseges = snapshot.data?.docs;
-                                for (var massege in masseges!.reversed){
-                                  userPhoto=massege.get('photo');
-                                  userFrame=massege.get('myframe');
-                                }
-                                return StreamBuilder<QuerySnapshot>(
-                                    stream:_firestore.collection('store').where('id',isEqualTo: userFrame).snapshots(),
-                                    builder: (context,snapshot){
-                                      String userFramePhoto="";
-                                      if (!snapshot.hasData) {
-                                        return const Center(
-                                          child: CircularProgressIndicator(
-                                            backgroundColor: Colors.blue,
-                                          ),
-                                        );
-                                      }
-                                      final masseges = snapshot.data?.docs;
-                                      for (var massege in masseges!.reversed){
-                                        userFramePhoto=massege.get('photo');
-                                      }
-                                      return Stack(
-                                        children: [
-                                          Container(
-                                            width: size.width*2,
-                                            child: CircleAvatar(
-                                              maxRadius: size.width+100,
-                                              backgroundImage: CachedNetworkImageProvider(userFramePhoto),
-                                              backgroundColor: Colors.transparent,
-                                            ),
-                                          ),
-                                          // Display the second image on the right
-                                          Center(
-                                            child: Container(
-                                              width: size.width-20-3.5,
-                                              child: CircleAvatar(
-                                                backgroundImage: CachedNetworkImageProvider(userPhoto),
-                                                backgroundColor: Colors.transparent,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      );
-                                }
-                                );
-                              },
-                            );
-                          }
-                        }
-                      ..inRoomMessageConfig=ZegoInRoomMessageConfig(
-                        height: 166,
-                        showAvatar: false,
-                      )
-                        ..layoutConfig.rowConfigs =layoutSeats=='9'? [
-                          ZegoLiveAudioRoomLayoutRowConfig(count: 1, alignment: ZegoLiveAudioRoomLayoutAlignment.center),
-                          ZegoLiveAudioRoomLayoutRowConfig(count: 4, alignment: ZegoLiveAudioRoomLayoutAlignment.spaceAround),
-                          ZegoLiveAudioRoomLayoutRowConfig(count: 4, alignment: ZegoLiveAudioRoomLayoutAlignment.spaceAround),
-                        ]: layoutSeats=='11'?[
-                          ZegoLiveAudioRoomLayoutRowConfig(count: 1, alignment: ZegoLiveAudioRoomLayoutAlignment.center),
-                          ZegoLiveAudioRoomLayoutRowConfig(count: 2, alignment: ZegoLiveAudioRoomLayoutAlignment.spaceAround),
-                          ZegoLiveAudioRoomLayoutRowConfig(count: 4, alignment: ZegoLiveAudioRoomLayoutAlignment.spaceAround),
-                          ZegoLiveAudioRoomLayoutRowConfig(count: 4, alignment: ZegoLiveAudioRoomLayoutAlignment.spaceAround),
-                        ]:[
-                          ZegoLiveAudioRoomLayoutRowConfig(count: 1, alignment: ZegoLiveAudioRoomLayoutAlignment.center),
-                          ZegoLiveAudioRoomLayoutRowConfig(count: 4, alignment: ZegoLiveAudioRoomLayoutAlignment.spaceAround),
-                          ZegoLiveAudioRoomLayoutRowConfig(count: 4, alignment: ZegoLiveAudioRoomLayoutAlignment.spaceAround),
-                          ZegoLiveAudioRoomLayoutRowConfig(count: 4, alignment: ZegoLiveAudioRoomLayoutAlignment.spaceAround),
-                        ]
-                        ..bottomMenuBarConfig.audienceButtons = const [
-                          ZegoMenuBarButtonName.showMemberListButton,
-                          ZegoMenuBarButtonName.applyToTakeSeatButton
-                        ]
-                      ..onSeatClicked=(index, user) {
-                        _handleSeatTap(index, user, lockedSeats.contains(index));
-                      }
-                        ..onSeatsChanged = (
-                            Map<int, ZegoUIKitUser> takenSeats,
-                            List<int> untakenSeats,
-                            ) {
-                          if (isRequestingNotifier.value) {
-                            if (takenSeats.values
-                                .map((e) => e.id)
-                                .toList()
-                                .contains(widget.userid)) {
-                              /// on the seat now
-                              isRequestingNotifier.value = false;
-                            }
-                          }
-                        }
-                        ..onSeatTakingRequestFailed = () {
-                          isRequestingNotifier.value = false;
-                        }
-                        ..onSeatTakingRequestRejected = () {
-                          isRequestingNotifier.value = false;
-                        }
-                        ..onSeatTakingRequested = (ZegoUIKitUser audience) {
-                          debugPrint('on seat taking requested, audience:$audience');
-                        }
-                        ..onInviteAudienceToTakeSeatFailed = () {
-                          debugPrint('on invite audience to take seat failed');
-                        }
-                        ..onSeatsChanged = (
-                            Map<int, ZegoUIKitUser> takenSeats,
-                            List<int> untakenSeats,
-                            ) {
-                          debugPrint(
-                            'on seats changed, taken seats: $takenSeats, untaken seats: $untakenSeats',
-                          );
-                          setState(() {
-                            userSeats.clear();
-                          });
-                          takenSeats.forEach((seatIndex, user) {
-                            setState(() {
-                              userSeats.add(user.id);
-                            });
-                            debugPrint('Seat $seatIndex is taken by user: $user');
-                            if (user.id==_auth.currentUser!.uid && myType=="host") {
-                              print("Start Time ===================");
-                              seatOccupiedTime = DateTime.now();
-                            }
-
-                            // Do whatever you need with the updated list of users in seats
-                            debugPrint('Users currently in seats: $userSeats');
-                          });
-                          if (userSeats.contains(_auth.currentUser!.uid)==false) {
-                            print("user lefttttttttttttttttttttt");
-                            if (seatOccupiedTime != null) {
-                              DateTime now = DateTime.now();
-                              Duration timeSpent = now.difference(seatOccupiedTime!);
-                              print('User spent ${timeSpent.inMinutes} minutes in the seat.');
-                              // Reset the seatOccupiedTime
-                              seatOccupiedTime = null;
-                              String myagent="";
-                              _firestore.collection('user').doc(_auth.currentUser!.uid).get().then((value){
-                                myagent=value.get('myagent');
-                              }).then((value){
-                                int lastincome=0;
-                                String docs="${DateTime.now().month.toString()}-${DateTime.now().day.toString()}";
-                                _firestore.collection('agency').doc(myagent).collection('users').doc(_auth.currentUser!.uid).collection('income').doc(docs).get().then((value){
-                                  lastincome=int.parse(value.get('hosttime'))+timeSpent.inMinutes;
-                                }).whenComplete((){
-                                  if(lastincome==0){
-                                    _firestore.collection('agency').doc(myagent).collection('users').doc(_auth.currentUser!.uid).collection('income').doc(docs).set({
-                                      'count':'0',
-                                      'date':DateTime.now().toString(),
-                                      'hosttime': timeSpent.inMinutes.toString(),
-                                      'numberradio':timeSpent.inMinutes>=60?'1':'0',
-                                    });
-                                  }
-                                  else{
-                                    _firestore.collection('agency').doc(myagent).collection('users').doc(_auth.currentUser!.uid).collection('income').doc(docs).update({
-                                      'hosttime':lastincome.toString(),
-                                      'numberradio':lastincome>=60?'1':'0',
-                                    });
-                                  }
-                                });
-                              });
-                            }
-                          }
-                        }
-                        ..bottomMenuBarConfig = ZegoBottomMenuBarConfig(
-                          maxCount: 6,
-                          audienceExtendButtons: [
-                            CircleAvatar(
-                                backgroundColor: Colors.white,
-                                child: IconButton(onPressed: (){
-                                  showModalBottomSheet(
-                                      backgroundColor:
-                                      Colors.transparent,
-                                      context: context,
-                                      builder: (builder) =>
-                                          bottomSheet());
-                                }, icon: Icon(Icons.card_giftcard,color: Colors.black,))),
-                          ],
-                          speakerExtendButtons: [
-                            CircleAvatar(
-                                backgroundColor: Colors.white,
-                                child: IconButton(onPressed: (){
-                                  showModalBottomSheet(
-                                      backgroundColor:
-                                      Colors.transparent,
-                                      context: context,
-                                      builder: (builder) =>
-                                          bottomSheet());
-                                }, icon: Icon(Icons.card_giftcard,color: Colors.black,))),
-                          ],
-                          hostExtendButtons: [
-
-                            CircleAvatar(
-                                backgroundColor: Colors.white,
-                                backgroundImage: AssetImage(AppImages.gift),
-                                child: InkWell(onTap: (){
-                                  showModalBottomSheet(
-                                      backgroundColor:
-                                      Colors.transparent,
-                                      context: context,
-                                      builder: (builder) =>
-                                          bottomSheet());
-                                }, child: Container())),
-                            Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                CircleAvatar(
-                                    backgroundColor: Colors.white,
-                                    child:pass==""? InkWell(onTap: (){
-                                      Navigator.pop(context);
-                                      SetPassword();
-                                    }, child: Icon(Icons.password,color: Colors.black,)):IconButton(onPressed: ()async{
-                                      _firestore.collection('room').doc(widget.roomID).update({
-                                        'password':''
-                                      }).then((value){
-                                        controller.message.send('Remove Password from Room');
-                                        setState(() {
-                                          pass="";
-                                        });
-                                        Navigator.pop(context);
-                                      });
-                                    }, icon: Icon(Icons.remove_circle_outline))
-                                ),
-                                pass==""?Text("Set Password To Room",style: TextStyle(color: Colors.white,fontSize: 8),):Text("Remove Password To Room",style: TextStyle(color: Colors.white,fontSize: 8),)
-                              ],
-                            ),
-                            Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                CircleAvatar(
-                                    backgroundColor: Colors.white,
-                                    backgroundImage: AssetImage(AppImages.music),
-                                    child: InkWell(onTap: (){
-                                      controller?.media.pickPureAudioFile().then((value){
-                                        Navigator.pop(context);
-                                        musicPath.add(value[0].path.toString());
-                                        musicname.add(value[0].name);
-                                        showModalBottomSheet(
-                                            backgroundColor:
-                                            Colors.transparent,
-                                            context: context,
-                                            builder: (builder) =>
-                                                MyMusic());
-                                      });
-
-
-                                    }, child:Container())),
-                                Text("Play Music",style: TextStyle(color: Colors.white,fontSize: 8),)
-                              ],
-                            ),
-                            Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                CircleAvatar(
-                                    backgroundColor: Colors.white,
-                                    backgroundImage: AssetImage(AppImages.wallpaper),
-                                    child: InkWell(
-                                        onTap: (){
-                                      Navigator.pop(context);
-                                      showModalBottomSheet(
-                                          backgroundColor:
-                                          Colors.transparent,
-                                          context: context,
-                                          builder: (builder) =>
-                                              MyWallpaper());
-                                    }, child: Container())
-                                ),
-                                Text("Change Room Wallpaper",style: TextStyle(color: Colors.white,fontSize: 8),)
-                              ],
-                            ),
-                            Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                CircleAvatar(
-                                  backgroundImage: AssetImage(AppImages.layout),
-                                    backgroundColor: Colors.white,
-                                    child: InkWell(
-                                        onTap: (){
-                                      ShowNumberSeat();
-                                    }, child: Container())),
-                                Text("Change Seat Number in Room",style: TextStyle(color: Colors.white,fontSize: 8),)
-                              ],
-                            ),
-                            controller.media.getCurrentProgress()!=0? Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                CircleAvatar(
-                                  backgroundColor: Colors.white,
-                                  child: IconButton(
-                                      onPressed: ()async{
-                                    print("done");
-                                    await controller.media.stop().whenComplete((){
-                                      print("done");
-                                    });
-                                    await controller.media.pause();
-                                  }, icon: Icon(Icons.music_off_sharp)),
-                                ),
-                                Text("Stop Media",style: TextStyle(color: Colors.white,fontSize: 8),)
-                              ],
-                            ):Container(),
-                          ],
-                          speakerButtons: [
-                            ZegoMenuBarButtonName.toggleMicrophoneButton,
-                            ZegoMenuBarButtonName.showMemberListButton,
-                          ],
-                        ),
-                      controller: controller,
-
-                  ));
+          stream: _firestore
+              .collection('store')
+              .where('id', isEqualTo: Myframe)
+              .snapshots(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
             }
+            for (var doc in snapshot.data!.docs) {
+              framePhoto = doc.get('photo') ?? '';
+            }
+
+            return SafeArea(
+              child: ZegoUIKitPrebuiltLiveAudioRoom(
+                appID: 911296599,
+                appSign:
+                    "6fbf17123e3533d8779f74cf45de647605d854ff8737fd4d2c9bc5b22f14edcb",
+                userID: widget.userid,
+                userName: widget.username,
+                roomID: viewID,
+                config: (widget.isHost
+                        ? ZegoUIKitPrebuiltLiveAudioRoomConfig.host()
+                        : ZegoUIKitPrebuiltLiveAudioRoomConfig.audience())
+                  ..onLeaveConfirmation = _onLeaveConfirmation
+                  ..background = _buildBackground()
+                  ..takeSeatIndexWhenJoining = widget.isHost ? 0 : -1
+                  ..hostSeatIndexes = [0]
+                  ..useSpeakerWhenJoining = true
+                  ..onMemberListMoreButtonPressed =
+                      onMemberListMoreButtonPressed
+                  ..seatConfig = ZegoLiveAudioRoomSeatConfig(
+                    backgroundBuilder: (context, size, user, extraInfo) =>
+                        Container(color: Colors.transparent),
+                    foregroundBuilder: (_, size, user, extraInfo) {
+                      final int seatIndex = extraInfo['seat_index'] ?? 0;
+                      final bool isLocked = extraInfo['seat_status'] == 2;
+                      final bool isEmpty = user == null;
+                      return GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () =>
+                            _handleSeatTap(seatIndex, user, isLocked),
+                        child: SizedBox(
+                          width: size.width,
+                          height: size.height,
+                          child: isEmpty
+                              ? Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    if (isLocked)
+                                      Icon(Icons.lock,
+                                          color: const Color(0xFF888888),
+                                          size: size.width * 0.35)
+                                    else
+                                      Icon(Icons.mic_none,
+                                          color: Colors.white54,
+                                          size: size.width * 0.35),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      isLocked ? '' : '$seatIndex',
+                                      style: const TextStyle(
+                                          color: Colors.white54, fontSize: 11),
+                                    ),
+                                  ],
+                                )
+                              : const SizedBox.shrink(),
+                        ),
+                      );
+                    },
+                    closeIcon: null,
+                    openIcon: null,
+                    avatarBuilder: (context, size, user, extraInfo) =>
+                        _buildAvatar(size, user),
+                  )
+                  ..inRoomMessageConfig = ZegoInRoomMessageConfig(
+                    height: 166,
+                    showAvatar: false,
+                  )
+                  ..layoutConfig.rowConfigs = _buildLayoutRows()
+                  ..onSeatClicked = (index, user) {
+                    _handleSeatTap(index, user, lockedSeats.contains(index));
+                  }
+                  ..onSeatsChanged = _onSeatsChanged
+                  ..onSeatTakingRequestFailed = () {
+                    isRequestingNotifier.value = false;
+                  }
+                  ..onSeatTakingRequestRejected = () {
+                    isRequestingNotifier.value = false;
+                  }
+                  ..onSeatTakingRequested = (ZegoUIKitUser audience) {}
+                  ..onInviteAudienceToTakeSeatFailed = () {}
+                  ..bottomMenuBarConfig = ZegoBottomMenuBarConfig(
+                    maxCount: 6,
+                    audienceExtendButtons: [_buildGiftButton()],
+                    speakerExtendButtons: [_buildGiftButton()],
+                    hostExtendButtons: [
+                      _buildGiftButton(),
+                      _buildPasswordButton(),
+                      _buildMusicButton(),
+                      _buildWallpaperButton(),
+                      _buildLayoutButton(),
+                      _buildAnnouncementButton(),
+                      _buildStopMusicButton(),
+                    ],
+                    speakerButtons: [
+                      ZegoMenuBarButtonName.toggleMicrophoneButton,
+                      ZegoMenuBarButtonName.showMemberListButton,
+                    ],
+                  ),
+                controller: controller,
+              ),
+            );
+          },
         );
       },
     );
   }
+
+  // ─────────────────────────────────────────────
+  // SEAT HANDLERS
+  // ─────────────────────────────────────────────
+
   void _handleSeatTap(int seatIndex, ZegoUIKitUser? user, bool isLocked) {
     final bool isEmpty = user == null;
-    final bool isOwner = MytypeInRoom == "owner" ||
-        MytypeInRoom == "admin" ||
-        _auth.currentUser!.uid == roomOwnerUID;
-    final bool isMySeat = !isEmpty && user!.id == _auth.currentUser!.uid;
+    final bool isMySeat =
+        !isEmpty && user!.id == _auth.currentUser!.uid;
 
     if (isMySeat) {
-      RemoveMe();
-    } else if (isOwner) {
+      _confirmLeaveSeat();
+    } else if (_isPrivileged) {
       if (isEmpty) {
         _showEmptySeatMenu(seatIndex, isLocked);
       } else {
         _showOccupiedSeatMenu(user!);
       }
     } else {
-      if (isEmpty && !isLocked) {
+      if (!isEmpty) {
+        _showUserProfileCard(user!);
+      } else if (!isLocked) {
         controller.takeSeat(seatIndex);
       }
     }
@@ -617,15 +355,15 @@ class _RoomViewBody extends State<RoomViewBody> {
       context: context,
       backgroundColor: const Color(0xFF1A1A2E),
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => Directionality(
         textDirection: TextDirection.rtl,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            _handle(),
             ListTile(
-              leading: const Icon(Icons.mic, color: Color(0xFFFFD700)),
+              leading: const Icon(Icons.mic, color: _gold),
               title: const Text('الانتقال إلى هذا المقعد',
                   style: TextStyle(color: Colors.white)),
               onTap: () async {
@@ -635,21 +373,17 @@ class _RoomViewBody extends State<RoomViewBody> {
               },
             ),
             ListTile(
-              leading: Icon(
-                isLocked ? Icons.lock_open : Icons.lock,
-                color: const Color(0xFFFFD700),
-              ),
-              title: Text(
-                isLocked ? 'فتح المقعد' : 'قفل المقعد',
-                style: const TextStyle(color: Colors.white),
-              ),
+              leading: Icon(isLocked ? Icons.lock_open : Icons.lock,
+                  color: _gold),
+              title: Text(isLocked ? 'فتح المقعد' : 'قفل المقعد',
+                  style: const TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
                 isLocked ? openSeat(seatIndex) : closeSeat(seatIndex);
               },
             ),
             ListTile(
-              leading: const Icon(Icons.person_add, color: Color(0xFFFFD700)),
+              leading: const Icon(Icons.person_add, color: _gold),
               title: const Text('دعوة عضو للمقعد',
                   style: TextStyle(color: Colors.white)),
               onTap: () {
@@ -657,6 +391,7 @@ class _RoomViewBody extends State<RoomViewBody> {
                 _showInviteMemberSheet(context, seatIndex);
               },
             ),
+            const SizedBox(height: 12),
           ],
         ),
       ),
@@ -668,16 +403,16 @@ class _RoomViewBody extends State<RoomViewBody> {
       context: context,
       backgroundColor: const Color(0xFF1A1A2E),
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => Directionality(
         textDirection: TextDirection.rtl,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            _handle(),
             ListTile(
-              leading: const Icon(Icons.mic_off, color: Color(0xFFFFD700)),
-              title: const Text('كتم المايك',
+              leading: const Icon(Icons.mic_off, color: _gold),
+              title: const Text('كتم الميكروفون',
                   style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
@@ -685,8 +420,8 @@ class _RoomViewBody extends State<RoomViewBody> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.airline_seat_recline_normal,
-                  color: Color(0xFFFFD700)),
+              leading:
+                  const Icon(Icons.airline_seat_recline_normal, color: _gold),
               title: const Text('إنزال من المقعد',
                   style: TextStyle(color: Colors.white)),
               onTap: () {
@@ -694,9 +429,133 @@ class _RoomViewBody extends State<RoomViewBody> {
                 controller.removeSpeakerFromSeat(user.id);
               },
             ),
+            if (MytypeInRoom == "owner")
+              ListTile(
+                leading: const Icon(Icons.admin_panel_settings, color: _gold),
+                title: const Text('تعيين كـ مشرف',
+                    style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _toggleAdminRole(user.id, user.name);
+                },
+              ),
+            if (MytypeInRoom == "owner")
+              ListTile(
+                leading: const Icon(Icons.block, color: Colors.redAccent),
+                title: const Text('حظر من الغرفة',
+                    style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _blockUser(user.id, user.name);
+                },
+              ),
+            const SizedBox(height: 12),
           ],
         ),
       ),
+    );
+  }
+
+  /// Shows a mini profile card for any seated user (non-privileged view)
+  void _showUserProfileCard(ZegoUIKitUser zegoUser) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => StreamBuilder<QuerySnapshot>(
+        stream: _firestore
+            .collection('user')
+            .where('doc', isEqualTo: zegoUser.id)
+            .snapshots(),
+        builder: (context, snap) {
+          if (!snap.hasData || snap.data!.docs.isEmpty) {
+            return const SizedBox(
+              height: 200,
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          final data = snap.data!.docs.first;
+          final name = data.get('name') ?? '';
+          final photo = data.get('photo') ?? '';
+          final level = data.get('level') ?? '1';
+          final vip = data.get('vip') ?? '0';
+          return Container(
+            margin: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF1A1A2E), Color(0xFF16213E)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: _gold.withOpacity(0.4), width: 1),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircleAvatar(
+                  radius: 40,
+                  backgroundImage: photo.isNotEmpty
+                      ? CachedNetworkImageProvider(photo)
+                      : null,
+                  backgroundColor: Colors.grey[800],
+                ),
+                const SizedBox(height: 12),
+                Text(name,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _badge('Lv.$level', Colors.blueAccent),
+                    if (vip != '0') ...[
+                      const SizedBox(width: 6),
+                      _badge('VIP $vip', _gold),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _gold,
+                    foregroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20)),
+                  ),
+                  icon: const Icon(Icons.card_giftcard),
+                  label: const Text('أرسل هدية'),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    showModalBottomSheet(
+                      backgroundColor: Colors.transparent,
+                      context: context,
+                      builder: (_) => bottomSheet(),
+                    );
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _badge(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color, width: 1),
+      ),
+      child:
+          Text(text, style: TextStyle(color: color, fontSize: 12)),
     );
   }
 
@@ -720,23 +579,19 @@ class _RoomViewBody extends State<RoomViewBody> {
       context: context,
       backgroundColor: const Color(0xFF1A1A2E),
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => SafeArea(
         child: members.isEmpty
             ? const ListTile(
                 title: Text('لا يوجد أعضاء للدعوة',
-                    style: TextStyle(color: Colors.white54)),
-              )
+                    style: TextStyle(color: Colors.white54)))
             : ListView.builder(
                 shrinkWrap: true,
                 itemCount: members.length,
                 itemBuilder: (_, i) => ListTile(
                   leading: const Icon(Icons.person, color: Colors.white70),
-                  title: Text(
-                    members[i].get('name') ?? '',
-                    style: const TextStyle(color: Colors.white),
-                  ),
+                  title: Text(members[i].get('name') ?? '',
+                      style: const TextStyle(color: Colors.white)),
                   onTap: () {
                     Navigator.pop(context);
                     controller.inviteAudienceToTakeSeat(members[i].get('id'));
@@ -747,755 +602,22 @@ class _RoomViewBody extends State<RoomViewBody> {
     );
   }
 
-  // Function to check if a seat is open
-  bool isSeatOpen(int seatIndex) {
-    return !lockedSeats.contains(seatIndex);
-  }
+  // ─────────────────────────────────────────────
+  // SEAT MANAGEMENT
+  // ─────────────────────────────────────────────
 
-  // Function to open a seat
   void openSeat(int seatIndex) {
-    if (!isSeatOpen(seatIndex)) {
-      // Implement logic to open the seat
-      setState(() {
-        lockedSeats.remove(seatIndex);
-        print("Opennnnnnnnnnn");
-      });
-      controller.openSeats(targetIndex: seatIndex); // You may need to implement this method in your ZegoLiveAudioRoomController
-      debugPrint('Host opened seat $seatIndex');
-    }
+    setState(() => lockedSeats.remove(seatIndex));
+    controller.openSeats(targetIndex: seatIndex);
   }
 
-  // Function to close a seat
   void closeSeat(int seatIndex) {
-    if (isSeatOpen(seatIndex)) {
-      // Implement logic to close the seat
-      setState(() {
-        lockedSeats.add(seatIndex);
-      });
-      controller.closeSeats(targetIndex: seatIndex); // You may need to implement this method in your ZegoLiveAudioRoomController
-      controller.message.send("Close Seat${seatIndex+1}");
-      debugPrint('Host closed seat $seatIndex');
-    }
+    setState(() => lockedSeats.add(seatIndex));
+    controller.closeSeats(targetIndex: seatIndex);
+    controller.message.send('تم قفل المقعد ${seatIndex + 1}');
   }
 
-  Widget connectButton() {
-    return ValueListenableBuilder<bool>(
-      valueListenable: isSeatClosedNotifier,
-      builder: (context, isSeatClosed, _) {
-        return isSeatClosed
-            ? ValueListenableBuilder<bool>(
-          valueListenable: isRequestingNotifier,
-          builder: (context, isRequesting, _) {
-            return isRequesting
-                ? ElevatedButton(
-              onPressed: () {
-                controller.cancelSeatTakingRequest().then((result) {
-                  isRequestingNotifier.value = false;
-                });
-              },
-              child: const Text('Cancel'),
-            )
-                : ElevatedButton(
-              onPressed: () {
-                controller.applyToTakeSeat().then((result) {
-                  isRequestingNotifier.value = result;
-                });
-              },
-              child: const Text('Request'),
-            );
-          },
-        )
-            : Container();
-      },
-    );
-  }
-  int getHostSeatIndex() {
-    if (widget.layoutMode == LayoutMode.hostCenter) {
-      return 4;
-    }
-
-    return 0;
-  }
-
-  bool isAttributeHost(Map<String, String>? userInRoomAttributes) {
-    return (userInRoomAttributes?[attributeKeyRole] ?? "") ==
-        ZegoLiveAudioRoomRole.host.index.toString();
-  }
-  Widget backgroundBuilder(
-      BuildContext context, Size size, ZegoUIKitUser? user, Map extraInfo) {
-    if (!isAttributeHost(user!.inRoomAttributes as Map<String, String>?)) {
-      return Container();
-    }
-
-    return Positioned(
-      top: -8,
-      left: 0,
-      child: Container(
-        width: size.width,
-        height: size.height,
-        decoration: BoxDecoration(
-          image:DecorationImage(
-              image: CachedNetworkImageProvider(framePhoto)
-          )
-        ),
-      ),
-    );
-  }
-
-
-  Widget background() {
-    /// how to replace background view
-    return Stack(
-      children: [
-        Container(
-          decoration: BoxDecoration(
-            image: DecorationImage(
-              fit: BoxFit.fill,
-              image:CachedNetworkImageProvider(wallpaper==""?"https://firebasestorage.googleapis.com/v0/b/hayaa-161f5.appspot.com/o/rooms%2Fclose-up-microphone-pop-filter-studio.jpg?alt=media&token=c9014900-dba7-4e7c-80c4-8d9fc6055462":wallpaper)
-            ),
-          ),
-        ),
-         Positioned(
-            top: 10,
-            left: 10,
-            child: InkWell(
-              onTap: (){
-                UpdateBio();
-              },
-              child: Text(
-                bio,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            )),
-        Positioned(
-          top: 10 + 20,
-          left: 10,
-          child: Text(
-            "ID : ${viewID}",
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
-        giftMedia!=""?Center(
-          child:gifttype!="svga"? CachedNetworkImage(
-            imageUrl: giftMedia,
-          ):SVGASimpleImage(
-            resUrl: giftMedia,
-          ),
-        ):Container(),
-        carMedia!=""?Center(
-          child:cartype!="svga"? CachedNetworkImage(
-            imageUrl: carMedia,
-          ):SVGASimpleImage(
-            resUrl: carMedia,
-          ),
-        ):Container(),
-
-      ],
-    );
-  }
-  void SetPassword() {
-    showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-              title: Text("تعين كلمة سر"),
-              content: Container(
-                child: SizedBox(
-                  height: 478,
-                  width: MediaQuery.of(context).size.width,
-                  child: Card(
-                    color: Colors.white,
-                    child: Padding(
-                        padding:  EdgeInsets.symmetric(horizontal: 10, vertical: 20),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                              children:  List.generate(
-                                6,
-                                    (index) => SizedBox(
-                                  width: 40.0,
-                                  child: TextField(
-                                    controller: _controllers[index],
-                                    focusNode: _focusNodes[index],
-                                    textAlign: TextAlign.center,
-                                    maxLength: 1,
-                                    onChanged: (value) {
-                                      if (value.isNotEmpty && index < 5) {
-                                        _focusNodes[index + 1].requestFocus();
-                                      } else if (value.isEmpty && index > 0) {
-                                        _focusNodes[index - 1].requestFocus();
-                                      }
-                                    },
-                                    decoration: InputDecoration(
-                                      counterText: '',
-                                      border: OutlineInputBorder(
-                                        borderSide: BorderSide(width: 2.0),
-                                        borderRadius: BorderRadius.circular(8.0),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            SizedBox(height: 16.0),
-                            ElevatedButton(
-                              onPressed: ()async {
-                                String passs = _controllers.map((controller) => controller.text).join();
-                                _firestore.collection('room').doc(widget.roomID).update({
-                                  'password':passs,
-                                }).then((value){
-                                  setState(() {
-                                    pass=passs;
-                                    for(int i=0;i<_controllers.length;i++){
-                                      _controllers[i].clear();
-                                    }
-                                  });
-                                  controller.message.send('Set Password to Room');
-                                  Navigator.pop(context);
-                                });
-                              },
-                              child: Text('Save Password'),
-                            ),
-                          ],
-                        )
-                    ),
-                  ),
-                )
-              )
-          );
-        });
-  }
-  Widget MyWallpaper() {
-    return SizedBox(
-      height: 278,
-      width: MediaQuery.of(context).size.width,
-      child: Card(
-        color: Colors.black,
-        margin:  EdgeInsets.all(18),
-        child: Padding(
-            padding:  EdgeInsets.symmetric(horizontal: 10, vertical: 20),
-            child: StreamBuilder<QuerySnapshot>(
-              stream: _firestore.collection('user').doc(_auth.currentUser!.uid).collection('mylook').where('cat',isEqualTo: 'wallpaper').snapshots(),
-              builder: (context,snapshot){
-                List<String> wallpapersDoc=[];
-                if (!snapshot.hasData) {
-                  return const Center(
-                    child: CircularProgressIndicator(
-                      backgroundColor: Colors.blue,
-                    ),
-                  );
-                }
-                final masseges = snapshot.data?.docs;
-                for (var massege in masseges!.reversed){
-                  wallpapersDoc.add(massege.get('id'));
-                }
-                return GridView.builder(
-                    itemCount: wallpapersDoc.length,
-                    scrollDirection: Axis.horizontal,
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2),
-                    itemBuilder: (context,index){
-                      return  StreamBuilder<QuerySnapshot>(
-                        stream: _firestore.collection("store").where('id',isEqualTo: wallpapersDoc[index]).snapshots(),
-                        builder: (context,snapshot){
-                          String wallpaperPhoto="";
-                          if (!snapshot.hasData) {
-                            return const Center(
-                              child: CircularProgressIndicator(
-                                backgroundColor: Colors.blue,
-                              ),
-                            );
-                          }
-                          final masseges = snapshot.data?.docs;
-                          for (var massege in masseges!.reversed){
-                            wallpaperPhoto=massege.get('photo');
-                          }
-                          return InkWell(
-                            onTap: ()async{
-                              await _firestore.collection('room').doc(widget.roomID).update({
-                                'wallpaper':wallpaperPhoto
-                              }).then((value){
-                                controller.message.send('Change Wallpaper of Room');
-                                setState(() {
-                                  wallpaper=wallpaperPhoto;
-                                });
-                              });
-                            },
-                            child: CircleAvatar(
-                              radius: 30,
-                              child: CachedNetworkImage(imageUrl:wallpaperPhoto),
-                              backgroundColor: Colors.transparent,
-                            ),
-                          );
-                        },
-                      );
-                }
-                );
-              },
-            )
-        ),
-      ),
-    );
-  }
-  Widget MyMusic() {
-    return SizedBox(
-      height: 278,
-      width: MediaQuery.of(context).size.width,
-      child: Card(
-        color: Colors.black,
-        margin:  EdgeInsets.all(18),
-        child: Padding(
-            padding:  EdgeInsets.symmetric(horizontal: 10, vertical: 20),
-            child: ListView.builder(
-              itemCount: musicPath.length,
-              itemBuilder: (context,index){
-                return ListTile(
-                  title: Text(musicname[index],style: TextStyle(color: Colors.white),),
-                  trailing: IconButton(onPressed: (){
-                    setState(() {
-                      viewMusic=true;
-                    });
-                    controller.media.play(filePathOrURL: musicPath[index]);
-                    controller.message.send('Play music ${musicPath[index]}');
-                    Navigator.pop(context);
-                  }, icon: Icon(Icons.play_arrow,color: Colors.green,)),
-                );
-              },
-            )
-        ),
-      ),
-    );
-  }
-  Widget bottomSheet() {
-    return SizedBox(
-      height: 278,
-      width: MediaQuery.of(context).size.width,
-      child: Card(
-        color: Colors.black,
-        margin:  EdgeInsets.all(18),
-        child: Padding(
-            padding:  EdgeInsets.symmetric(horizontal: 10, vertical: 20),
-            child: StreamBuilder<QuerySnapshot>(
-              stream: _firestore.collection('gifts').snapshots(),
-              builder: (context,snapshot){
-                List<GiftModel> gifts=[];
-                if (!snapshot.hasData) {
-                  return const Center(
-                    child: CircularProgressIndicator(
-                      backgroundColor: Colors.blue,
-                    ),
-                  );
-                }
-                final masseges = snapshot.data?.docs;
-                for (var massege in masseges!.reversed) {
-                  gifts.add(
-                      GiftModel(massege.id, massege.get('name'), massege.get('photo'), massege.get('price'),massege.get('type'))
-                  );
-                }
-                return GridView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: gifts.length,
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2),
-                    itemBuilder: (context,index){
-                      return InkWell(
-                        onTap: (){
-                          Navigator.pop(context);
-                          showModalBottomSheet(
-                              backgroundColor:
-                              Colors.black,
-                              context: context,
-                              builder: (builder) =>
-                                  bottomSheet2(gifts[index]));
-                        },
-                        child: Row(
-                          children: [
-                            Column(
-                              children: [
-                                gifts[index].type=="svga"?CircleAvatar(
-                                  radius: 30,
-                                  child: SVGASimpleImage(
-                                    resUrl: gifts[index].photo,
-                                  ),
-                                  backgroundColor: Colors.transparent,
-                                ):CircleAvatar(
-                                  radius: 30,
-                                  child: CachedNetworkImage(imageUrl: gifts[index].photo),
-                                  backgroundColor: Colors.transparent,
-                                ),
-                                Text(gifts[index].Name,style: TextStyle(color: Colors.white),),
-                                Row(
-                                  children: [
-                                    CircleAvatar(
-                                      backgroundImage: AssetImage(AppImages.gold_coin),
-                                      radius: 5,
-                                    ),
-                                    Text(gifts[index].price,style: TextStyle(color: Colors.orangeAccent),),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      );
-                    }
-                );
-              },
-            )
-        ),
-      ),
-    );
-  }
-  String mycoin="";
-  String myexp="";
-  String myfamily="";
-  Widget bottomSheet2(GiftModel gift) {
-    return SizedBox(
-      height: 478,
-      width: MediaQuery.of(context).size.width,
-      child: Card(
-        color: Colors.black,
-        margin:  EdgeInsets.all(18),
-        child: Padding(
-            padding:  EdgeInsets.symmetric(horizontal: 10, vertical: 20),
-            child: ListView.builder(
-              itemCount: userSeats.length,
-              itemBuilder: (context,index){
-                return StreamBuilder<QuerySnapshot>(
-                  stream: _firestore.collection('user').where("doc",isEqualTo: userSeats[index]).snapshots(),
-                  builder: (context,snapshot){
-                    String type="";
-                    String name="";
-                    String photo="";
-                    String framedoc="";
-                    String framephoto="";
-                    String agent="";
-                    if (!snapshot.hasData) {
-                      return Center(
-                        child: CircularProgressIndicator(
-                          backgroundColor: Colors.blue,
-                        ),
-                      );
-                    }
-                    final masseges = snapshot.data?.docs;
-                    for (var massege in masseges!.reversed){
-                      name=massege.get('name');
-                      photo=massege.get("photo");
-                      framedoc=massege.get("myframe");
-                      type=massege.get('type');
-                      agent=massege.get('myagent');
-                      if(userSeats[index]==_auth.currentUser!.uid){
-                        mycoin=massege.get('coin');
-                        myexp=massege.get('exp');
-                        myfamily=massege.get('myfamily');
-                      }
-                    }
-                    return StreamBuilder<QuerySnapshot>(
-                      stream: _firestore.collection('store').where("id",isEqualTo: framedoc).snapshots(),
-                      builder: (context,snapshot){
-                        if (!snapshot.hasData) {
-                          return Center(
-                            child: CircularProgressIndicator(
-                              backgroundColor: Colors.blue,
-                            ),
-                          );
-                        }
-                        final masseges = snapshot.data?.docs;
-                        for (var massege in masseges!.reversed){
-                          framephoto=massege.get('photo');
-                        }
-                        return userSeats[index]==_auth.currentUser!.uid?Container()
-                            :ListTile(
-                          title: Text(name,style: TextStyle(color: Colors.white),),
-                          leading: Stack(
-                            children: [
-                              CircleAvatar(
-                                backgroundImage: CachedNetworkImageProvider(photo),
-                                radius: 12,
-                                backgroundColor: Colors.white,
-                              ),
-                              CircleAvatar(
-                                backgroundImage: CachedNetworkImageProvider(framephoto),
-                                radius: 12,
-                                backgroundColor: Colors.transparent,
-                              )
-                            ],
-                          ),
-                          onTap: ()async{
-                            int coins=int.parse(mycoin);
-                            int price=int.parse(gift.price);
-                            double exp2=0;
-                            int daimonds=0;
-                            if(coins>=price){
-                              int exp=int.parse(myexp);
-                              exp=exp+price;
-                              coins=coins-price;
-                              await _firestore.collection('user').doc(_auth.currentUser!.uid).update({
-                                'coin':coins.toString(),
-                                'exp':exp.toString(),
-                              }).then((value){
-                                _firestore.collection('user').doc(userSeats[index]).get().then((value){
-                                  exp2=double.parse(value.get('exp2'));
-                                  daimonds=int.parse(value.get('daimond'));
-                                }).then((value){
-                                  daimonds=daimonds+price;
-                                  double newexp=(exp2)+(daimonds/4);
-                                  _firestore.collection('user').doc(userSeats[index]).update({
-                                    'exp2':newexp.toString(),
-                                    'daimond':daimonds.toString(),
-                                  }).then((value){
-                                    _firestore.collection('user').doc(userSeats[index]).collection('Mygifts').doc().set({
-                                      'id':gift.docID
-                                    }).then((value){
-                                      _firestore.collection('user').doc(userSeats[index]).get().then((value){
-                                        String friendfamily=value.get('myfamily');
-                                        if(friendfamily==""){
-
-                                        }
-                                        else{
-                                          _firestore.collection('family').doc(friendfamily).collection('count2').doc().set({
-                                            'user':userSeats[index],
-                                            'day':DateTime.now().day.toString(),
-                                            'month':DateTime.now().month.toString(),
-                                            'year':DateTime.now().year.toString(),
-                                            'coin':gift.price
-                                          });
-                                        }
-                                      });
-                                    }).then((value){
-                                      String docs="${DateTime.now().month.toString()}-${DateTime.now().day.toString()}";
-                                      if(type=="host"){
-                                        int lastincome=0;
-                                        _firestore.collection('agency').doc(agent).collection('users').doc(userSeats[index]).collection('income').doc(docs).get().then((value){
-                                          lastincome=int.parse(value.get('count'))+int.parse(gift.price);
-                                        }).whenComplete((){
-                                          if(lastincome==0){
-                                            _firestore.collection('agency').doc(agent).collection('users').doc(userSeats[index]).collection('income').doc(docs).set({
-                                              'date':DateTime.now().toString(),
-                                              'hosttime':'0',
-                                              'numberradio':'0',
-                                              'count':gift.price,
-                                            });
-                                          }
-                                          else{
-                                            _firestore.collection('agency').doc(agent).collection('users').doc(userSeats[index]).collection('income').doc(docs).update({
-                                              'count':lastincome.toString()
-                                            });
-                                          }
-                                          SendDone();
-                                          Navigator.pop(context);
-                                        });
-                                      }
-                                      else{
-                                        SendDone();
-                                        Navigator.pop(context);
-                                      }
-                                    }).then((value){
-                                      Navigator.pop(context);
-                                      controller.message.send("Send ${gift.Name} to User ${name}");
-                                      _firestore.collection('room').doc(widget.roomID).update({
-                                        'gift':gift.photo,
-                                        'gifttype':gift.type
-                                      });
-                                      setState(() {
-                                        giftMedia=gift.photo;
-                                        gifttype=gift.type;
-                                      });
-                                      SendDone();
-                                      Future.delayed(const Duration(seconds: 4)).then((value){
-                                        _firestore.collection('room').doc(widget.roomID).update({
-                                          'gift':"",
-                                          'gifttype':""
-                                        });
-                                        setState(() {
-                                          giftMedia="";
-                                          gifttype="";
-                                        });
-                                      }).then((value){
-                                        String docGift="${DateTime.now().toString()}-${_auth.currentUser!.uid}";
-                                        _firestore.collection('room').doc(widget.roomID).collection('gift').doc(docGift).set({
-                                          'giftdoc':gift.docID,
-                                          'sender':_auth.currentUser!.uid,
-                                          'recever':userSeats[index]
-                                        }).then((value){
-                                          _firestore.collection('user').doc(_auth.currentUser!.uid).collection('sendgift').doc().set({
-                                            'giftid':gift.docID,
-                                            'target':userSeats[index]
-                                          });
-                                        });
-                                      });
-                                    });
-                                  });
-                                });
-                              });
-                            }
-                            else{
-                              SendDisApprove();
-                            }
-                          },
-                        );
-                      },
-                    );
-                  },
-                );
-              },
-            )
-        ),
-      ),
-    );
-  }
-  void SendDone() {
-    showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-              title: Text("مبروك"),
-              content: Container(
-                height: 120,
-                child: Center(
-                  child:  Text("تم ارسال الهدية بنجاح"),
-                ),
-              )
-          );
-        });
-  }
-  void SendDisApprove() {
-    showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-              title: Text("ناسف"),
-              content: Container(
-                height: 120,
-                child: Center(
-                  child:  Text("لا تملك العملات الكافية"),
-                ),
-              )
-          );
-        });
-  }
-  void UpdateBio() {
-    TextEditingController controllerBio=TextEditingController();
-    showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-              title: Text("تحديث عنوان الغرفة"),
-              content: Container(
-                height: 220,
-                child:Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      decoration: InputDecoration(
-                        hintText: 'ادخل عنوان الغرفة الجديد',
-                      ),
-                      controller: controllerBio,
-                    ),
-                    ElevatedButton(onPressed: (){}, child: Text("تحديث"))
-                  ],
-                )
-              )
-          );
-        });
-  }
-  void ChangeMemberValue(String id,String name) {
-    showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-              content: Container(
-                  height: 220,
-                  child: StreamBuilder<QuerySnapshot>(
-                    stream: _firestore.collection('room').doc(widget.roomID).collection('user').snapshots(),
-                    builder: (context,snapshot){
-                      String TpUser="";
-                      if (!snapshot.hasData) {
-                        return Center(
-                          child: CircularProgressIndicator(
-                            backgroundColor: Colors.blue,
-                          ),
-                        );
-                      }
-                      final masseges = snapshot.data?.docs;
-                      for (var massege in masseges!.reversed){
-                        if(massege.get('id')==id){
-                          TpUser=massege.get('type');
-                        }
-                      }
-                      return Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          MytypeInRoom=="owner"?ElevatedButton(onPressed: ()async{
-                            if(TpUser=="admin"){
-                              await _firestore.collection('room').doc(widget.roomID).collection('user').doc(id).update({
-                                'type':'admin'
-                              }).then((value){
-                                controller.message.send("Make ${name} as Co-Host");
-                                Navigator.pop(context);
-                              });
-                            }
-                            else{
-                              await _firestore.collection('room').doc(widget.roomID).collection('user').doc(id).update({
-                                'type':'normal'
-                              }).then((value){
-                                controller.message.send("Make ${name} as User");
-                                Navigator.pop(context);
-                              });
-                            }
-                          },
-                              child: TpUser=="normal"?Text("Make a Host"):Text("Make A Normal")
-                          ):Container(),
-                          SizedBox(height: 10,),
-                          ElevatedButton(onPressed: (){
-                            controller.turnMicrophoneOn(false,userID: id);
-                            Navigator.pop(context);
-                          },
-                              child: Text("Mute This Member")),
-                          SizedBox(height: 10,),
-                          ElevatedButton(onPressed: ()async{
-                            await _firestore.collection("room").doc(widget.roomID).collection('user').doc(id).delete().then((value){
-                              controller.message.send('Kikout ${name} from room');
-                              Navigator.pop(context);
-                            });
-                          },
-                              child: Text("Kick out")),
-                          SizedBox(height: 10,),
-                          ElevatedButton(onPressed: ()async{
-                            Navigator.of(context).pop();
-                            _firestore.collection('room').doc(widget.roomID).collection('block').doc(id).set({
-                              'id':id
-                            }).then((value){
-                              ZegoUIKit().removeUserFromRoom(
-                                [id],
-                              ).then((result) {
-                                _firestore.collection("room").doc(widget.roomID).collection('user').doc(id).delete().then((value){
-                                  controller.message.send('Block ${name} in room');
-                                });
-                              });
-                            });
-                          },
-                              child: Text("Block")),
-                          SizedBox(height: 10,),
-                        ],
-                      );
-                    },
-                  )
-              )
-          );
-        });
-  }
-  void RemoveMe() {
+  void _confirmLeaveSeat() {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -1519,158 +641,1449 @@ class _RoomViewBody extends State<RoomViewBody> {
       ),
     );
   }
-  void ShowNumberSeat() {
-    showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-              title: Text("تحدديد عدد المايكات"),
-              content: Container(
-                height: 220,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    ElevatedButton(onPressed: ()async{
-                      _firestore.collection('room').doc(widget.roomID).update({
-                        'seat':'9'
-                      }).then((value){
-                        setState(() {
-                          layoutSeats='9';
-                          Navigator.pop(context);
-                        });
-                      });
-                    }, child: Text('9')),
-                    SizedBox(height: 10,),
-                    ElevatedButton(onPressed: ()async{
-                      _firestore.collection('room').doc(widget.roomID).update({
-                        'seat':'11'
-                      }).then((value){
-                        setState(() {
-                          layoutSeats='11';
-                          Navigator.pop(context);
-                        });
-                      });
-                    }, child: Text('11')),
-                    SizedBox(height: 10,),
-                    ElevatedButton(onPressed: ()async{
-                      _firestore.collection('room').doc(widget.roomID).update({
-                        'seat':'13'
-                      }).then((value){
-                        setState(() {
-                          layoutSeats='13';
-                          Navigator.pop(context);
-                        });
-                      });
-                    }, child: Text('13')),
-                  ],
-                )
-              )
-          );
-        });
-  }
-  void onMemberListMoreButtonPressed(ZegoUIKitUser user) {
-    showModalBottomSheet(
-      backgroundColor: const Color(0xff111014),
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(32.0),
-          topRight: Radius.circular(32.0),
-        ),
-      ),
-      isDismissible: true,
-      isScrollControlled: true,
-      builder: (BuildContext context) {
-        const textStyle = TextStyle(
-          color: Colors.white,
-          fontSize: 12,
-          fontWeight: FontWeight.w500,
-        );
-        final listMenu =MytypeInRoom=="owner"
-            ? [
-          GestureDetector(
-            onTap: () async {
-              Navigator.of(context).pop();
-              ZegoUIKit().removeUserFromRoom(
-                [user.id],
-              ).then((result) {
-                _firestore.collection("room").doc(widget.roomID).collection('user').doc(user.id).delete().then((value){
-                  controller.message.send('Kikout ${user.name} from room');
-                });
-              });
-            },
-            child: Text(
-              'Kick Out ${user.name}',
-              style: textStyle,
-            ),
-          ),
-          GestureDetector(
-            onTap: () async {
-              Navigator.of(context).pop();
-              _firestore.collection('room').doc(widget.roomID).collection('block').doc(user.id).set({
-                'id':user.id
-              }).then((value){
-                ZegoUIKit().removeUserFromRoom(
-                  [user.id],
-                ).then((result) {
-                  _firestore.collection("room").doc(widget.roomID).collection('user').doc(user.id).delete().then((value){
-                    controller.message.send('Block ${user.name} in room');
-                  });
-                });
-              });
-            },
-            child: Text(
-              'Block ${user.name}',
-              style: textStyle,
-            ),
-          ),
-          GestureDetector(
-            onTap: () async {
-              Navigator.of(context).pop();
 
-              controller
-                  ?.inviteAudienceToTakeSeat(user.id)
-                  .then((result) {
-                debugPrint('invite audience to take seat result:$result');
+  // ─────────────────────────────────────────────
+  // SEATS CHANGED CALLBACK
+  // ─────────────────────────────────────────────
+
+  void _onSeatsChanged(
+      Map<int, ZegoUIKitUser> takenSeats, List<int> untakenSeats) {
+    setState(() => userSeats.clear());
+    takenSeats.forEach((seatIndex, user) {
+      setState(() => userSeats.add(user.id));
+      if (user.id == _auth.currentUser!.uid && myType == "host") {
+        seatOccupiedTime ??= DateTime.now();
+      }
+    });
+
+    if (!userSeats.contains(_auth.currentUser!.uid) &&
+        seatOccupiedTime != null) {
+      final timeSpent = DateTime.now().difference(seatOccupiedTime!);
+      seatOccupiedTime = null;
+      _saveHostIncome(timeSpent);
+    }
+  }
+
+  void _saveHostIncome(Duration timeSpent) {
+    _firestore
+        .collection('user')
+        .doc(_auth.currentUser!.uid)
+        .get()
+        .then((value) {
+      final myagent = value.get('myagent') ?? '';
+      if (myagent.isEmpty) return;
+      final docs =
+          "${DateTime.now().month}-${DateTime.now().day}";
+      final incomeRef = _firestore
+          .collection('agency')
+          .doc(myagent)
+          .collection('users')
+          .doc(_auth.currentUser!.uid)
+          .collection('income')
+          .doc(docs);
+
+      incomeRef.get().then((inc) {
+        final prev = inc.exists ? int.tryParse(inc.get('hosttime') ?? '0') ?? 0 : 0;
+        final total = prev + timeSpent.inMinutes;
+        if (!inc.exists) {
+          incomeRef.set({
+            'count': '0',
+            'date': DateTime.now().toString(),
+            'hosttime': total.toString(),
+            'numberradio': total >= 60 ? '1' : '0',
+          });
+        } else {
+          incomeRef.update({
+            'hosttime': total.toString(),
+            'numberradio': total >= 60 ? '1' : '0',
+          });
+        }
+      });
+    });
+  }
+
+  // ─────────────────────────────────────────────
+  // LEAVE CONFIRMATION
+  // ─────────────────────────────────────────────
+
+  Future<bool> _onLeaveConfirmation(BuildContext ctx) async {
+    return await showDialog<bool>(
+          context: ctx,
+          builder: (_) => AlertDialog(
+            backgroundColor: Colors.blue[900]!.withOpacity(0.9),
+            title: const Text('مغادرة الغرفة',
+                style: TextStyle(color: Colors.white70)),
+            content: const Text('هل تريد مغادرة الغرفة؟',
+                style: TextStyle(color: Colors.white70)),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('إلغاء'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  await _firestore
+                      .collection('room')
+                      .doc(widget.roomID)
+                      .collection('user')
+                      .doc(_auth.currentUser!.uid)
+                      .delete();
+                  Navigator.of(context).pop(true);
+                },
+                child: const Text('خروج'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  // ─────────────────────────────────────────────
+  // BACKGROUND & AVATAR BUILDERS
+  // ─────────────────────────────────────────────
+
+  Widget _buildBackground() {
+    return Stack(
+      children: [
+        // Wallpaper
+        Positioned.fill(
+          child: CachedNetworkImage(
+            imageUrl: wallpaper.isEmpty
+                ? "https://firebasestorage.googleapis.com/v0/b/hayaa-161f5.appspot.com/o/rooms%2Fclose-up-microphone-pop-filter-studio.jpg?alt=media&token=c9014900-dba7-4e7c-80c4-8d9fc6055462"
+                : wallpaper,
+            fit: BoxFit.cover,
+          ),
+        ),
+        // Dark overlay for readability
+        Positioned.fill(
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withOpacity(0.3),
+                  Colors.black.withOpacity(0.5),
+                ],
+              ),
+            ),
+          ),
+        ),
+        // Room info bar
+        Positioned(
+          top: 8,
+          left: 12,
+          right: 12,
+          child: Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: _isPrivileged ? _showUpdateBio : null,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        bio,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          shadows: [Shadow(blurRadius: 4)],
+                        ),
+                      ),
+                      Text(
+                        'ID: $viewID',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              // Online count badge
+              StreamBuilder<QuerySnapshot>(
+                stream: _firestore
+                    .collection('room')
+                    .doc(widget.roomID)
+                    .collection('user')
+                    .snapshots(),
+                builder: (context, snap) {
+                  final count = snap.data?.docs.length ?? 0;
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black45,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.remove_red_eye,
+                            color: Colors.white70, size: 14),
+                        const SizedBox(width: 4),
+                        Text('$count',
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+        // Gift animation overlay
+        if (giftMedia.isNotEmpty)
+          Center(
+            child: gifttype != "svga"
+                ? CachedNetworkImage(imageUrl: giftMedia, height: 180)
+                : SizedBox(
+                    height: 180,
+                    width: 180,
+                    child: SVGASimpleImage(resUrl: giftMedia)),
+          ),
+        // Car animation overlay
+        if (carMedia.isNotEmpty)
+          Center(
+            child: cartype != "svga"
+                ? CachedNetworkImage(imageUrl: carMedia, height: 160)
+                : SizedBox(
+                    height: 160,
+                    width: 160,
+                    child: SVGASimpleImage(resUrl: carMedia)),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildAvatar(Size size, ZegoUIKitUser? user) {
+    if (user == null) return const SizedBox.shrink();
+
+    final isMe = user.id == _auth.currentUser!.uid;
+    if (isMe) {
+      return _avatarStack(
+        size,
+        framePhoto,
+        _auth.currentUser!.photoURL ?? '',
+      );
+    }
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('user')
+          .where('doc', isEqualTo: user.id)
+          .snapshots(),
+      builder: (context, snap) {
+        String userPhoto = '';
+        String userFrame = '';
+        if (snap.hasData) {
+          for (var doc in snap.data!.docs) {
+            userPhoto = doc.get('photo') ?? '';
+            userFrame = doc.get('myframe') ?? '';
+          }
+        }
+        return StreamBuilder<QuerySnapshot>(
+          stream: _firestore
+              .collection('store')
+              .where('id', isEqualTo: userFrame)
+              .snapshots(),
+          builder: (context, snap2) {
+            String framePh = '';
+            if (snap2.hasData) {
+              for (var doc in snap2.data!.docs) {
+                framePh = doc.get('photo') ?? '';
+              }
+            }
+            return _avatarStack(size, framePh, userPhoto);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _avatarStack(Size size, String frameUrl, String photoUrl) {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        if (frameUrl.isNotEmpty)
+          CircleAvatar(
+            maxRadius: size.width,
+            backgroundImage: CachedNetworkImageProvider(frameUrl),
+            backgroundColor: Colors.transparent,
+          ),
+        Container(
+          width: size.width - 23,
+          height: size.width - 23,
+          child: CircleAvatar(
+            backgroundImage: photoUrl.isNotEmpty
+                ? CachedNetworkImageProvider(photoUrl)
+                : null,
+            backgroundColor: Colors.grey[700],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // LAYOUT ROWS
+  // ─────────────────────────────────────────────
+
+  List<ZegoLiveAudioRoomLayoutRowConfig> _buildLayoutRows() {
+    if (layoutSeats == '11') {
+      return [
+        ZegoLiveAudioRoomLayoutRowConfig(
+            count: 1,
+            alignment: ZegoLiveAudioRoomLayoutAlignment.center),
+        ZegoLiveAudioRoomLayoutRowConfig(
+            count: 2,
+            alignment: ZegoLiveAudioRoomLayoutAlignment.spaceAround),
+        ZegoLiveAudioRoomLayoutRowConfig(
+            count: 4,
+            alignment: ZegoLiveAudioRoomLayoutAlignment.spaceAround),
+        ZegoLiveAudioRoomLayoutRowConfig(
+            count: 4,
+            alignment: ZegoLiveAudioRoomLayoutAlignment.spaceAround),
+      ];
+    } else if (layoutSeats == '13') {
+      return [
+        ZegoLiveAudioRoomLayoutRowConfig(
+            count: 1,
+            alignment: ZegoLiveAudioRoomLayoutAlignment.center),
+        ZegoLiveAudioRoomLayoutRowConfig(
+            count: 4,
+            alignment: ZegoLiveAudioRoomLayoutAlignment.spaceAround),
+        ZegoLiveAudioRoomLayoutRowConfig(
+            count: 4,
+            alignment: ZegoLiveAudioRoomLayoutAlignment.spaceAround),
+        ZegoLiveAudioRoomLayoutRowConfig(
+            count: 4,
+            alignment: ZegoLiveAudioRoomLayoutAlignment.spaceAround),
+      ];
+    }
+    // default '9'
+    return [
+      ZegoLiveAudioRoomLayoutRowConfig(
+          count: 1,
+          alignment: ZegoLiveAudioRoomLayoutAlignment.center),
+      ZegoLiveAudioRoomLayoutRowConfig(
+          count: 4,
+          alignment: ZegoLiveAudioRoomLayoutAlignment.spaceAround),
+      ZegoLiveAudioRoomLayoutRowConfig(
+          count: 4,
+          alignment: ZegoLiveAudioRoomLayoutAlignment.spaceAround),
+    ];
+  }
+
+  // ─────────────────────────────────────────────
+  // BOTTOM BAR BUTTONS
+  // ─────────────────────────────────────────────
+
+  Widget _buildGiftButton() {
+    return CircleAvatar(
+      backgroundColor: Colors.white,
+      child: IconButton(
+        onPressed: () => showModalBottomSheet(
+          backgroundColor: Colors.transparent,
+          context: context,
+          builder: (_) => bottomSheet(),
+        ),
+        icon: const Icon(Icons.card_giftcard, color: Colors.black),
+      ),
+    );
+  }
+
+  Widget _buildPasswordButton() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        CircleAvatar(
+          backgroundColor: Colors.white,
+          child: IconButton(
+            onPressed: () {
+              Navigator.pop(context);
+              if (pass.isEmpty) {
+                _showSetPasswordDialog();
+              } else {
+                _removePassword();
+              }
+            },
+            icon: Icon(
+              pass.isEmpty ? Icons.lock_open : Icons.lock,
+              color: Colors.black,
+            ),
+          ),
+        ),
+        Text(
+          pass.isEmpty ? 'كلمة سر' : 'إزالة السر',
+          style: const TextStyle(color: Colors.white, fontSize: 8),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMusicButton() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        CircleAvatar(
+          backgroundColor: Colors.white,
+          backgroundImage: AssetImage(AppImages.music),
+          child: InkWell(
+            onTap: () {
+              controller.media.pickPureAudioFile().then((value) {
+                Navigator.pop(context);
+                for (var f in value) {
+                  musicPath.add(f.path);
+                  musicname.add(f.name);
+                }
+                showModalBottomSheet(
+                  backgroundColor: Colors.transparent,
+                  context: context,
+                  builder: (_) => _buildMusicSheet(),
+                );
               });
             },
-            child: Text(
-              'Invite ${user.name} to take seat',
-              style: textStyle,
-            ),
+            child: Container(),
           ),
-          GestureDetector(
-            onTap: () async {
-              Navigator.of(context).pop();
+        ),
+        const Text('موسيقى',
+            style: TextStyle(color: Colors.white, fontSize: 8)),
+      ],
+    );
+  }
+
+  Widget _buildWallpaperButton() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        CircleAvatar(
+          backgroundColor: Colors.white,
+          backgroundImage: AssetImage(AppImages.wallpaper),
+          child: InkWell(
+            onTap: () {
+              Navigator.pop(context);
+              showModalBottomSheet(
+                backgroundColor: Colors.transparent,
+                context: context,
+                builder: (_) => _buildWallpaperSheet(),
+              );
             },
-            child: const Text(
-              'Cancel',
-              style: textStyle,
-            ),
+            child: Container(),
           ),
-        ]
-            : [];
-        return AnimatedPadding(
-          padding: MediaQuery.of(context).viewInsets,
-          duration: const Duration(milliseconds: 50),
-          child: Container(
-            padding: const EdgeInsets.symmetric(
-              vertical: 0,
-              horizontal: 10,
-            ),
-            child: ListView.builder(
-              shrinkWrap: true,
-              itemCount: listMenu.length,
-              itemBuilder: (BuildContext context, int index) {
-                return SizedBox(
-                  height: 60,
-                  child: Center(child: listMenu[index]),
+        ),
+        const Text('خلفية',
+            style: TextStyle(color: Colors.white, fontSize: 8)),
+      ],
+    );
+  }
+
+  Widget _buildLayoutButton() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        CircleAvatar(
+          backgroundColor: Colors.white,
+          backgroundImage: AssetImage(AppImages.layout),
+          child: InkWell(
+            onTap: () => _showSeatCountDialog(),
+            child: Container(),
+          ),
+        ),
+        const Text('مقاعد',
+            style: TextStyle(color: Colors.white, fontSize: 8)),
+      ],
+    );
+  }
+
+  Widget _buildAnnouncementButton() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        CircleAvatar(
+          backgroundColor: Colors.white,
+          child: IconButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _showAnnouncementDialog();
+            },
+            icon:
+                const Icon(Icons.campaign_outlined, color: Colors.black),
+          ),
+        ),
+        const Text('إعلان',
+            style: TextStyle(color: Colors.white, fontSize: 8)),
+      ],
+    );
+  }
+
+  Widget _buildStopMusicButton() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        CircleAvatar(
+          backgroundColor: Colors.white,
+          child: IconButton(
+            onPressed: () async {
+              await controller.media.stop();
+              await controller.media.pause();
+            },
+            icon: const Icon(Icons.music_off, color: Colors.black),
+          ),
+        ),
+        const Text('إيقاف',
+            style: TextStyle(color: Colors.white, fontSize: 8)),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // GIFT SHEETS
+  // ─────────────────────────────────────────────
+
+  Widget bottomSheet() {
+    return Container(
+      height: 300,
+      margin: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _gold.withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text('الهدايا',
+                style: TextStyle(
+                    color: _gold,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold)),
+          ),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: _firestore.collection('gifts').snapshots(),
+              builder: (context, snap) {
+                if (!snap.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final gifts = snap.data!.docs
+                    .map((d) => GiftModel(
+                        d.id,
+                        d.get('name'),
+                        d.get('photo'),
+                        d.get('price'),
+                        d.get('type')))
+                    .toList();
+
+                return GridView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: gifts.length,
+                  gridDelegate:
+                      const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2),
+                  itemBuilder: (context, index) {
+                    final gift = gifts[index];
+                    return GestureDetector(
+                      onTap: () {
+                        Navigator.pop(context);
+                        showModalBottomSheet(
+                          backgroundColor: Colors.transparent,
+                          context: context,
+                          builder: (_) => bottomSheet2(gift),
+                        );
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.white10,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            gift.type == "svga"
+                                ? SizedBox(
+                                    width: 40,
+                                    height: 40,
+                                    child: SVGASimpleImage(
+                                        resUrl: gift.photo))
+                                : CachedNetworkImage(
+                                    imageUrl: gift.photo,
+                                    width: 40,
+                                    height: 40),
+                            const SizedBox(height: 4),
+                            Text(gift.Name,
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 10),
+                                overflow: TextOverflow.ellipsis),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Image.asset(AppImages.gold_coin,
+                                    width: 12, height: 12),
+                                const SizedBox(width: 2),
+                                Text(gift.price,
+                                    style: const TextStyle(
+                                        color: _gold, fontSize: 10)),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
                 );
               },
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget bottomSheet2(GiftModel gift) {
+    return Container(
+      height: 500,
+      margin: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _gold.withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text('اختر المستلم',
+                style: TextStyle(
+                    color: _gold,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold)),
+          ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: userSeats.length,
+              itemBuilder: (context, index) {
+                final uid = userSeats[index];
+                return StreamBuilder<QuerySnapshot>(
+                  stream: _firestore
+                      .collection('user')
+                      .where('doc', isEqualTo: uid)
+                      .snapshots(),
+                  builder: (context, snap) {
+                    if (!snap.hasData || snap.data!.docs.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+                    final data = snap.data!.docs.first;
+                    final name = data.get('name') ?? '';
+                    final photo = data.get('photo') ?? '';
+                    final framedoc = data.get('myframe') ?? '';
+                    final type = data.get('type') ?? '';
+                    final agent = data.get('myagent') ?? '';
+                    final friendfamily = data.get('myfamily') ?? '';
+
+                    if (uid == _auth.currentUser!.uid) {
+                      mycoin = data.get('coin') ?? '0';
+                      myexp = data.get('exp') ?? '0';
+                      myfamily = data.get('myfamily') ?? '';
+                      return const SizedBox.shrink();
+                    }
+
+                    return StreamBuilder<QuerySnapshot>(
+                      stream: _firestore
+                          .collection('store')
+                          .where('id', isEqualTo: framedoc)
+                          .snapshots(),
+                      builder: (context, snap2) {
+                        String framephoto = '';
+                        if (snap2.hasData && snap2.data!.docs.isNotEmpty) {
+                          framephoto =
+                              snap2.data!.docs.first.get('photo') ?? '';
+                        }
+                        return ListTile(
+                          leading: Stack(
+                            children: [
+                              CircleAvatar(
+                                radius: 20,
+                                backgroundImage: photo.isNotEmpty
+                                    ? CachedNetworkImageProvider(photo)
+                                    : null,
+                                backgroundColor: Colors.grey[700],
+                              ),
+                              if (framephoto.isNotEmpty)
+                                CircleAvatar(
+                                  radius: 20,
+                                  backgroundImage:
+                                      CachedNetworkImageProvider(framephoto),
+                                  backgroundColor: Colors.transparent,
+                                ),
+                            ],
+                          ),
+                          title: Text(name,
+                              style:
+                                  const TextStyle(color: Colors.white)),
+                          trailing: Icon(Icons.send, color: _gold),
+                          onTap: () => _sendGift(
+                            gift: gift,
+                            receiverUID: uid,
+                            receiverName: name,
+                            receiverType: type,
+                            receiverAgent: agent,
+                            receiverFamily: friendfamily,
+                          ),
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _sendGift({
+    required GiftModel gift,
+    required String receiverUID,
+    required String receiverName,
+    required String receiverType,
+    required String receiverAgent,
+    required String receiverFamily,
+  }) async {
+    final coins = int.tryParse(mycoin) ?? 0;
+    final price = int.tryParse(gift.price) ?? 0;
+    if (coins < price) {
+      _showInfoDialog('رصيد غير كافٍ', 'لا تملك عملات كافية لإرسال هذه الهدية');
+      return;
+    }
+
+    Navigator.pop(context);
+
+    // Deduct from sender
+    final newCoins = coins - price;
+    final newExp = (int.tryParse(myexp) ?? 0) + price;
+    await _firestore.collection('user').doc(_auth.currentUser!.uid).update({
+      'coin': newCoins.toString(),
+      'exp': newExp.toString(),
+    });
+    setState(() {
+      mycoin = newCoins.toString();
+      myexp = newExp.toString();
+    });
+
+    // Credit receiver
+    final receiverSnap =
+        await _firestore.collection('user').doc(receiverUID).get();
+    final prevDiamonds =
+        int.tryParse(receiverSnap.get('daimond') ?? '0') ?? 0;
+    final prevExp2 =
+        double.tryParse(receiverSnap.get('exp2') ?? '0') ?? 0.0;
+    final newDiamonds = prevDiamonds + price;
+    final newExp2 = prevExp2 + (newDiamonds / 4);
+
+    await _firestore.collection('user').doc(receiverUID).update({
+      'daimond': newDiamonds.toString(),
+      'exp2': newExp2.toString(),
+    });
+
+    // Record gift on receiver
+    await _firestore
+        .collection('user')
+        .doc(receiverUID)
+        .collection('Mygifts')
+        .add({'id': gift.docID});
+
+    // Family tracking
+    if (receiverFamily.isNotEmpty) {
+      await _firestore
+          .collection('family')
+          .doc(receiverFamily)
+          .collection('count2')
+          .add({
+        'user': receiverUID,
+        'day': DateTime.now().day.toString(),
+        'month': DateTime.now().month.toString(),
+        'year': DateTime.now().year.toString(),
+        'coin': gift.price,
+      });
+    }
+
+    // Agency income tracking
+    if (receiverType == "host" && receiverAgent.isNotEmpty) {
+      final docs = "${DateTime.now().month}-${DateTime.now().day}";
+      final incomeRef = _firestore
+          .collection('agency')
+          .doc(receiverAgent)
+          .collection('users')
+          .doc(receiverUID)
+          .collection('income')
+          .doc(docs);
+      final incSnap = await incomeRef.get();
+      if (!incSnap.exists) {
+        await incomeRef.set({
+          'date': DateTime.now().toString(),
+          'hosttime': '0',
+          'numberradio': '0',
+          'count': gift.price,
+        });
+      } else {
+        final prev = int.tryParse(incSnap.get('count') ?? '0') ?? 0;
+        await incomeRef.update({'count': (prev + price).toString()});
+      }
+    }
+
+    // Display gift in room
+    setState(() {
+      giftMedia = gift.photo;
+      gifttype = gift.type;
+    });
+    await _firestore.collection('room').doc(widget.roomID).update({
+      'gift': gift.photo,
+      'gifttype': gift.type,
+    });
+    controller.message.send('أرسل ${_auth.currentUser!.displayName ?? ''} هدية ${gift.Name} إلى $receiverName 🎁');
+
+    // Log gift history
+    final docGift =
+        "${DateTime.now().millisecondsSinceEpoch}-${_auth.currentUser!.uid}";
+    await _firestore
+        .collection('room')
+        .doc(widget.roomID)
+        .collection('gift')
+        .doc(docGift)
+        .set({
+      'giftdoc': gift.docID,
+      'sender': _auth.currentUser!.uid,
+      'receiver': receiverUID,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+    await _firestore
+        .collection('user')
+        .doc(_auth.currentUser!.uid)
+        .collection('sendgift')
+        .add({'giftid': gift.docID, 'target': receiverUID});
+
+    // Clear gift display after 4 seconds
+    Future.delayed(const Duration(seconds: 4), () {
+      if (!mounted) return;
+      setState(() {
+        giftMedia = '';
+        gifttype = '';
+      });
+      _firestore.collection('room').doc(widget.roomID).update({
+        'gift': '',
+        'gifttype': '',
+      });
+    });
+
+    _showSuccessDialog();
+  }
+
+  // ─────────────────────────────────────────────
+  // MEMBER MANAGEMENT
+  // ─────────────────────────────────────────────
+
+  void onMemberListMoreButtonPressed(ZegoUIKitUser user) {
+    showModalBottomSheet(
+      backgroundColor: const Color(0xFF111014),
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      isDismissible: true,
+      isScrollControlled: true,
+      builder: (BuildContext context) {
+        const style = TextStyle(
+            color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500);
+
+        final items = <Widget>[];
+
+        if (_isPrivileged) {
+          // Mute
+          items.add(_menuItem(
+            icon: Icons.mic_off,
+            label: 'كتم ${user.name}',
+            style: style,
+            onTap: () {
+              Navigator.pop(context);
+              controller.turnMicrophoneOn(false, userID: user.id);
+            },
+          ));
+          // Invite to seat
+          items.add(_menuItem(
+            icon: Icons.record_voice_over,
+            label: 'دعوة ${user.name} للمقعد',
+            style: style,
+            onTap: () {
+              Navigator.pop(context);
+              controller.inviteAudienceToTakeSeat(user.id);
+            },
+          ));
+          // Kick out
+          items.add(_menuItem(
+            icon: Icons.exit_to_app,
+            label: 'طرد ${user.name}',
+            style: style,
+            onTap: () async {
+              Navigator.pop(context);
+              await ZegoUIKit().removeUserFromRoom([user.id]);
+              await _firestore
+                  .collection('room')
+                  .doc(widget.roomID)
+                  .collection('user')
+                  .doc(user.id)
+                  .delete();
+              controller.message.send('تم طرد ${user.name} من الغرفة');
+            },
+          ));
+        }
+
+        if (MytypeInRoom == "owner") {
+          // Toggle admin
+          items.add(_menuItem(
+            icon: Icons.admin_panel_settings,
+            label: 'تعيين/إزالة مشرف ${user.name}',
+            style: style,
+            onTap: () {
+              Navigator.pop(context);
+              _toggleAdminRole(user.id, user.name);
+            },
+          ));
+          // Block
+          items.add(_menuItem(
+            icon: Icons.block,
+            label: 'حظر ${user.name}',
+            style: const TextStyle(
+                color: Colors.redAccent,
+                fontSize: 14,
+                fontWeight: FontWeight.w500),
+            onTap: () {
+              Navigator.pop(context);
+              _blockUser(user.id, user.name);
+            },
+          ));
+        }
+
+        items.add(_menuItem(
+          icon: Icons.close,
+          label: 'إلغاء',
+          style: style,
+          onTap: () => Navigator.pop(context),
+        ));
+
+        return AnimatedPadding(
+          padding: MediaQuery.of(context).viewInsets,
+          duration: const Duration(milliseconds: 50),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: ListView(
+              shrinkWrap: true,
+              children: items,
+            ),
+          ),
         );
       },
+    );
+  }
+
+  Widget _menuItem({
+    required IconData icon,
+    required String label,
+    required TextStyle style,
+    required VoidCallback onTap,
+  }) {
+    return ListTile(
+      leading: Icon(icon, color: style.color),
+      title: Text(label, style: style),
+      onTap: onTap,
+    );
+  }
+
+  void _toggleAdminRole(String userId, String userName) {
+    _firestore
+        .collection('room')
+        .doc(widget.roomID)
+        .collection('user')
+        .doc(userId)
+        .get()
+        .then((snap) {
+      final currentType = snap.get('type') ?? 'normal';
+      final newType = currentType == 'admin' ? 'normal' : 'admin';
+      _firestore
+          .collection('room')
+          .doc(widget.roomID)
+          .collection('user')
+          .doc(userId)
+          .update({'type': newType}).then((_) {
+        controller.message.send(newType == 'admin'
+            ? 'تم تعيين $userName كمشرف 🛡️'
+            : 'تم إزالة $userName من المشرفين');
+      });
+    });
+  }
+
+  void _blockUser(String userId, String userName) {
+    _firestore
+        .collection('room')
+        .doc(widget.roomID)
+        .collection('block')
+        .doc(userId)
+        .set({'id': userId}).then((_) {
+      ZegoUIKit().removeUserFromRoom([userId]).then((_) {
+        _firestore
+            .collection('room')
+            .doc(widget.roomID)
+            .collection('user')
+            .doc(userId)
+            .delete();
+        controller.message.send('تم حظر $userName من الغرفة 🚫');
+      });
+    });
+  }
+
+  // ─────────────────────────────────────────────
+  // DIALOGS
+  // ─────────────────────────────────────────────
+
+  void _showSetPasswordDialog() {
+    for (var c in _passControllers) {
+      c.clear();
+    }
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text('تعيين كلمة سر',
+            style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: List.generate(
+                6,
+                (i) => SizedBox(
+                  width: 38,
+                  child: TextField(
+                    controller: _passControllers[i],
+                    focusNode: _focusNodes[i],
+                    textAlign: TextAlign.center,
+                    maxLength: 1,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: Colors.white),
+                    onChanged: (v) {
+                      if (v.isNotEmpty && i < 5) {
+                        _focusNodes[i + 1].requestFocus();
+                      } else if (v.isEmpty && i > 0) {
+                        _focusNodes[i - 1].requestFocus();
+                      }
+                    },
+                    decoration: InputDecoration(
+                      counterText: '',
+                      filled: true,
+                      fillColor: Colors.white10,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide:
+                            BorderSide(color: _gold.withOpacity(0.5)),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: _gold),
+              onPressed: () {
+                final newPass =
+                    _passControllers.map((c) => c.text).join();
+                if (newPass.length < 6) return;
+                _firestore
+                    .collection('room')
+                    .doc(widget.roomID)
+                    .update({'password': newPass}).then((_) {
+                  setState(() => pass = newPass);
+                  controller.message.send('تم تعيين كلمة سر للغرفة 🔐');
+                  Navigator.pop(context);
+                });
+              },
+              child: const Text('حفظ', style: TextStyle(color: Colors.black)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _removePassword() {
+    _firestore
+        .collection('room')
+        .doc(widget.roomID)
+        .update({'password': ''}).then((_) {
+      setState(() => pass = '');
+      controller.message.send('تم إزالة كلمة السر من الغرفة 🔓');
+    });
+  }
+
+  void _showAnnouncementDialog() {
+    final announcementCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: Row(
+          children: const [
+            Icon(Icons.campaign, color: _gold),
+            SizedBox(width: 8),
+            Text('إعلان الغرفة',
+                style: TextStyle(color: Colors.white)),
+          ],
+        ),
+        content: TextField(
+          controller: announcementCtrl,
+          maxLines: 3,
+          maxLength: 200,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'اكتب إعلانك هنا...',
+            hintStyle: const TextStyle(color: Colors.white38),
+            filled: true,
+            fillColor: Colors.white10,
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child:
+                const Text('إلغاء', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _gold),
+            onPressed: () {
+              final text = announcementCtrl.text.trim();
+              if (text.isEmpty) return;
+              controller.message.send('📢 إعلان: $text');
+              _firestore.collection('room').doc(widget.roomID).update({
+                'announcement': text,
+                'announcementTime': FieldValue.serverTimestamp(),
+              });
+              Navigator.pop(context);
+            },
+            child: const Text('إرسال',
+                style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showUpdateBio() {
+    final bioCtrl = TextEditingController(text: bio);
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text('تحديث عنوان الغرفة',
+            style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: bioCtrl,
+          maxLength: 60,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'ادخل عنوان الغرفة',
+            hintStyle: const TextStyle(color: Colors.white38),
+            filled: true,
+            fillColor: Colors.white10,
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child:
+                const Text('إلغاء', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _gold),
+            onPressed: () {
+              final newBio = bioCtrl.text.trim();
+              if (newBio.isEmpty) return;
+              _firestore
+                  .collection('room')
+                  .doc(widget.roomID)
+                  .update({'bio': newBio}).then((_) {
+                setState(() => bio = newBio);
+                Navigator.pop(context);
+              });
+            },
+            child: const Text('تحديث',
+                style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSeatCountDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text('عدد المقاعد',
+            style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: ['9', '11', '13'].map((count) {
+            final isSelected = layoutSeats == count;
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isSelected ? _gold : Colors.white24,
+                  minimumSize: const Size(double.infinity, 44),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () {
+                  _firestore
+                      .collection('room')
+                      .doc(widget.roomID)
+                      .update({'seat': count}).then((_) {
+                    setState(() => layoutSeats = count);
+                    Navigator.pop(context);
+                  });
+                },
+                child: Text('$count مقاعد',
+                    style: TextStyle(
+                        color: isSelected ? Colors.black : Colors.white)),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // WALLPAPER & MUSIC SHEETS
+  // ─────────────────────────────────────────────
+
+  Widget _buildWallpaperSheet() {
+    return Container(
+      height: 280,
+      margin: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _gold.withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text('اختر خلفية',
+                style: TextStyle(
+                    color: _gold,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16)),
+          ),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: _firestore
+                  .collection('user')
+                  .doc(_auth.currentUser!.uid)
+                  .collection('mylook')
+                  .where('cat', isEqualTo: 'wallpaper')
+                  .snapshots(),
+              builder: (context, snap) {
+                if (!snap.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final ids = snap.data!.docs
+                    .map((d) => d.get('id') as String)
+                    .toList();
+                if (ids.isEmpty) {
+                  return const Center(
+                      child: Text('لا توجد خلفيات',
+                          style: TextStyle(color: Colors.white54)));
+                }
+                return GridView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: ids.length,
+                  gridDelegate:
+                      const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2),
+                  itemBuilder: (context, index) {
+                    return StreamBuilder<QuerySnapshot>(
+                      stream: _firestore
+                          .collection('store')
+                          .where('id', isEqualTo: ids[index])
+                          .snapshots(),
+                      builder: (context, snap2) {
+                        String photo = '';
+                        if (snap2.hasData &&
+                            snap2.data!.docs.isNotEmpty) {
+                          photo = snap2.data!.docs.first.get('photo') ?? '';
+                        }
+                        return GestureDetector(
+                          onTap: () async {
+                            await _firestore
+                                .collection('room')
+                                .doc(widget.roomID)
+                                .update({'wallpaper': photo});
+                            setState(() => wallpaper = photo);
+                            controller.message.send('تم تغيير خلفية الغرفة');
+                            Navigator.pop(context);
+                          },
+                          child: Container(
+                            margin: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                  color: wallpaper == photo
+                                      ? _gold
+                                      : Colors.transparent,
+                                  width: 2),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: photo.isNotEmpty
+                                  ? CachedNetworkImage(
+                                      imageUrl: photo, fit: BoxFit.cover)
+                                  : const SizedBox.shrink(),
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMusicSheet() {
+    return Container(
+      height: 280,
+      margin: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _gold.withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text('قائمة الموسيقى',
+                style: TextStyle(
+                    color: _gold,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16)),
+          ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: musicPath.length,
+              itemBuilder: (context, index) {
+                return ListTile(
+                  leading: const Icon(Icons.music_note, color: _gold),
+                  title: Text(musicname[index],
+                      style: const TextStyle(color: Colors.white)),
+                  trailing: IconButton(
+                    icon:
+                        const Icon(Icons.play_arrow, color: Colors.green),
+                    onPressed: () {
+                      controller.media
+                          .play(filePathOrURL: musicPath[index]);
+                      controller.message
+                          .send('يتم تشغيل موسيقى 🎵');
+                      Navigator.pop(context);
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // FEEDBACK DIALOGS
+  // ─────────────────────────────────────────────
+
+  void _showSuccessDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.check_circle, color: Colors.greenAccent, size: 60),
+            const SizedBox(height: 12),
+            const Text('تم إرسال الهدية بنجاح! 🎁',
+                style: TextStyle(color: Colors.white, fontSize: 16),
+                textAlign: TextAlign.center),
+          ],
+        ),
+      ),
+    );
+    Future.delayed(const Duration(seconds: 2),
+        () => Navigator.of(context, rootNavigator: true).pop());
+  }
+
+  void _showInfoDialog(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: Text(title, style: const TextStyle(color: Colors.white)),
+        content: Text(message,
+            style: const TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('حسناً', style: TextStyle(color: _gold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // HELPERS
+  // ─────────────────────────────────────────────
+
+  Widget _handle() {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 10),
+      width: 40,
+      height: 4,
+      decoration: BoxDecoration(
+        color: Colors.white30,
+        borderRadius: BorderRadius.circular(2),
+      ),
     );
   }
 }
