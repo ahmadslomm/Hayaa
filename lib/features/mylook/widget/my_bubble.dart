@@ -177,8 +177,8 @@ class _MyBubble extends State<MyBubble>{
                       }
                     },
                     style: ElevatedButton.styleFrom(
-                      primary:mybubble==ss.docID?Colors.red: Colors.grey,
-                      onPrimary: Colors.white,
+                      backgroundColor:mybubble==ss.docID?Colors.red: Colors.grey,
+                      foregroundColor: Colors.white,
                       elevation: 5,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),

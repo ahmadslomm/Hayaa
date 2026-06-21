@@ -166,8 +166,8 @@ class _HeadStore extends State<HeadStore>{
                         Allarm(id, imgPath, days, always, DateTime.now().toString(), pp);
                       },
                       style: ElevatedButton.styleFrom(
-                        primary: Colors.blue.shade300,
-                        onPrimary: Colors.white,
+                        backgroundColor: Colors.blue.shade300,
+                        foregroundColor: Colors.white,
                         elevation: 5,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
@@ -187,8 +187,8 @@ class _HeadStore extends State<HeadStore>{
                           MaterialPageRoute(builder: (context) => SendItemStore(ss)));
                     },
                     style: ElevatedButton.styleFrom(
-                      primary: Colors.grey,
-                      onPrimary: Colors.white,
+                      backgroundColor: Colors.grey,
+                      foregroundColor: Colors.white,
                       elevation: 5,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),

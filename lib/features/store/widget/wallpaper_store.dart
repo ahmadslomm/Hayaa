@@ -165,8 +165,8 @@ class _WallpaperStore extends State<WallpaperStore> {
                             DateTime.now().toString(), pp);
                       },
                       style: ElevatedButton.styleFrom(
-                        primary: Colors.blue.shade300,
-                        onPrimary: Colors.white,
+                        backgroundColor: Colors.blue.shade300,
+                        foregroundColor: Colors.white,
                         elevation: 5,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),

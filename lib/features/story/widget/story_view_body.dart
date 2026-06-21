@@ -3,10 +3,10 @@ import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:hayaa_main/features/story/widget/view_story_screen.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../../core/Utils/supabase_helper.dart';
 import '../../../models/story_model.dart';
 import '../../../models/user_model.dart';
 import 'add_story.dart';
@@ -18,7 +18,6 @@ class StoryViewBody extends StatefulWidget{
 class _StoryViewBody extends State<StoryViewBody>{
   final FirebaseFirestore _firestore=FirebaseFirestore.instance;
   final FirebaseAuth _auth=FirebaseAuth.instance;
-  final FirebaseStorage firebaseStorage=FirebaseStorage.instance;
   final ImagePicker picker=ImagePicker();
   XFile? image;
   DateTime now=DateTime.now();
@@ -97,7 +96,7 @@ class _StoryViewBody extends State<StoryViewBody>{
                 }
                 else{
                   if(storytype=="photo" || storytype=="vedio"){
-                    firebaseStorage.refFromURL(storyMedia).delete();
+                    SupabaseHelper.deleteImage(storyMedia);
                   }
                   _firestore.collection("storys").doc(storyid).delete().then(
                         (doc) => {},
@@ -108,7 +107,7 @@ class _StoryViewBody extends State<StoryViewBody>{
             }
             else{
               if(storytype=="photo" || storytype=="vedio"){
-                firebaseStorage.refFromURL(storyMedia).delete();
+                SupabaseHelper.deleteImage(storyMedia);
               }
               _firestore.collection("storys").doc(storyid).delete().then(
                     (doc) => {},
@@ -205,7 +204,7 @@ class _StoryViewBody extends State<StoryViewBody>{
                               }
                               else{
                                 if(dd<now.day-1) {
-                                  firebaseStorage.refFromURL(storyMedia).delete();
+                                  SupabaseHelper.deleteImage(storyMedia);
 
                                   _firestore.collection("storys").doc(storyid)
                                       .delete()
@@ -220,7 +219,7 @@ class _StoryViewBody extends State<StoryViewBody>{
                                 }
                                 else{
                                   if(storytype=="photo" || storytype=="vedio"){
-                                    firebaseStorage.refFromURL(storyMedia).delete();
+                                    SupabaseHelper.deleteImage(storyMedia);
                                   }
                                   _firestore.collection("storys").doc(storyid).delete().then(
                                         (doc) =>{},
@@ -231,7 +230,7 @@ class _StoryViewBody extends State<StoryViewBody>{
                             }
                             else{
                               if(storytype=="photo" || storytype=="vedio"){
-                                firebaseStorage.refFromURL(storyMedia).delete();
+                                SupabaseHelper.deleteImage(storyMedia);
                               }
                               _firestore.collection("storys").doc(storyid).delete().then(
                                     (doc) =>{},
@@ -424,12 +423,8 @@ class _StoryViewBody extends State<StoryViewBody>{
     setState(() {
       image=img;
     });
-    final path="story/photos/${image!.name}";
     final file =File(image!.path);
-    final ref=FirebaseStorage.instance.ref().child(path);
-    final uploadTask=ref.putFile(file);
-    final snapshot=await uploadTask.whenComplete(() {});
-    final urlDownload = await snapshot.ref.getDownloadURL();
+    final urlDownload = await SupabaseHelper.uploadImage(file);
     print("Download Link : $urlDownload");
     final id =DateTime.now().toString();
     String idd="$id-${_auth.currentUser!.uid}";

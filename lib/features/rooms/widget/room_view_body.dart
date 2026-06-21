@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/svg.dart';
 import 'package:svgaplayer_flutter/player.dart';
 import 'package:zego_uikit_prebuilt_live_audio_room/zego_uikit_prebuilt_live_audio_room.dart';
+import '../../../core/Utils/app_colors.dart';
 import '../../../core/Utils/app_images.dart';
 import '../../../models/gift_model.dart';
 import 'constant.dart';
@@ -21,6 +22,7 @@ class RoomViewBody extends StatefulWidget{
 }
 
 class _RoomViewBody extends State<RoomViewBody> {
+  static const Color _gold = Color(0xFFFFD700);
   bool openchat=true;
   List<int> lockedSeats = []; // List to store locked seat indexes
   List<String> userSeats=[];
@@ -47,6 +49,7 @@ class _RoomViewBody extends State<RoomViewBody> {
   String gifttype="";
   String myType="";
   String MytypeInRoom="";
+  String roomOwnerUID="";
   String lock="lib/core/Utils/assets/images/icon/lock_8497362.png";
   @override
   void initState() {
@@ -101,11 +104,12 @@ class _RoomViewBody extends State<RoomViewBody> {
         pass=snap.get('password');
         giftMedia=snap.get('gift');
         carMedia=snap.get('car');
+        roomOwnerUID=snap.get('owner');
       });
     }
   }
   void UserBlock()async{
-    if(!widget.isHost){
+    if(MytypeInRoom!="owner"){
       await for(var snap in _firestore.collection('room').doc(widget.roomID).collection('block').where('id',isEqualTo: _auth.currentUser!.uid).snapshots()){
         if(snap.size!=0){
           controller.leave(context,showConfirmation: false);
@@ -151,9 +155,9 @@ class _RoomViewBody extends State<RoomViewBody> {
               }
               return  SafeArea(
                   child: ZegoUIKitPrebuiltLiveAudioRoom(
-                      appID: 265494176,
+                      appID: 911296599,
                       // Fill in the appID that you get from ZEGOCLOUD Admin Console.
-                      appSign: "2b1240dd8d882f29730af2121a749432cdae133cabda3388af8efc71b275c99e",
+                      appSign: "6fbf17123e3533d8779f74cf45de647605d854ff8737fd4d2c9bc5b22f14edcb",
                       // Fill in the appSign that you get from ZEGOCLOUD Admin Console.
                       userID: widget.username,
                       userName: widget.userid,
@@ -198,13 +202,46 @@ class _RoomViewBody extends State<RoomViewBody> {
                         ..onMemberListMoreButtonPressed=onMemberListMoreButtonPressed
                         ..seatConfig=ZegoLiveAudioRoomSeatConfig(
                           backgroundBuilder: (context, size, user, extraInfo) {
-                            return Container(color: Colors.transparent,);
+                            return Container(color: Colors.transparent);
                           },
-                            foregroundBuilder: (context, size, user, extraInfo) {
-                              return Container(color: Colors.transparent,);
-                            },
-                            closeIcon: Image.asset(lock),
-                          openIcon: Image.network("https://firebasestorage.googleapis.com/v0/b/hayaa-161f5.appspot.com/o/rooms%2Fsofa_6458474.png?alt=media&token=dff6124f-805c-4386-bd95-394c4fa611f7")
+                          foregroundBuilder: (_, size, user, extraInfo) {
+                            final int seatIndex = extraInfo['seat_index'] ?? 0;
+                            final bool isLocked = extraInfo['seat_status'] == 2;
+                            final bool isEmpty = user == null;
+
+                            return GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {
+                                _handleSeatTap(seatIndex, user, isLocked);
+                              },
+                              child: SizedBox(
+                                width: size.width,
+                                height: size.height,
+                                child: isEmpty
+                                    ? Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          if (isLocked)
+                                            Icon(Icons.lock,
+                                                color: const Color(0xFF888888),
+                                                size: size.width * 0.3),
+                                          if (!isLocked)
+                                            Text(
+                                              '$seatIndex',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                        ],
+                                      )
+                                    : const SizedBox.shrink(),
+                              ),
+                            );
+                          },
+                          closeIcon: null,
+                          openIcon: null,
                         )
                         ..seatConfig.avatarBuilder=(context, size, user, extraInfo) {
                           if(user!.id==_auth.currentUser!.uid){
@@ -316,45 +353,7 @@ class _RoomViewBody extends State<RoomViewBody> {
                           ZegoMenuBarButtonName.applyToTakeSeatButton
                         ]
                       ..onSeatClicked=(index, user) {
-                        print("Value ${isSeatOpen(index)}");
-                        if(widget.isHost){
-                          if(isSeatOpen(index) && user==null){
-                            openSeat(index);
-                          }
-                          else{
-                           if(user==null){
-                             closeSeat(index);
-                           }
-                           if(user!.id!=_auth.currentUser!.uid){
-                             ChangeMemberValue(user.id,user.name);
-                           }
-                          }
-                        }
-                        else{
-                          if(MytypeInRoom=="admin"){
-                            if(isSeatOpen(index) && user==null){
-                              openSeat(index);
-                            }
-                            else{
-                              if(user==null){
-                                closeSeat(index);
-                              }
-                              else{
-                                if(user!.id!=_auth.currentUser!.uid){
-                                  ChangeMemberValue(user.id,user.name);
-                                }
-                                else{
-                                  RemoveMe();
-                                }
-                              }
-                            }
-                          }
-                          else{
-                            if(user!.id==_auth.currentUser!.uid){
-                              RemoveMe();
-                            }
-                          }
-                        }
+                        _handleSeatTap(index, user, lockedSeats.contains(index));
                       }
                         ..onSeatsChanged = (
                             Map<int, ZegoUIKitUser> takenSeats,
@@ -466,30 +465,6 @@ class _RoomViewBody extends State<RoomViewBody> {
                                       builder: (builder) =>
                                           bottomSheet());
                                 }, icon: Icon(Icons.card_giftcard,color: Colors.black,))),
-                            Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                CircleAvatar(
-                                    backgroundColor: Colors.white,
-                                    backgroundImage: AssetImage(AppImages.music),
-                                    child: InkWell(onTap: (){
-                                      controller?.media.pickPureAudioFile().then((value){
-                                        Navigator.pop(context);
-                                        musicPath.add(value[0].path.toString());
-                                        musicname.add(value[0].name);
-                                        showModalBottomSheet(
-                                            backgroundColor:
-                                            Colors.transparent,
-                                            context: context,
-                                            builder: (builder) =>
-                                                MyMusic());
-                                      });
-
-
-                                    }, child:Container())),
-                                Text("Play Music",style: TextStyle(color: Colors.white,fontSize: 8),)
-                              ],
-                            ),
                           ],
                           hostExtendButtons: [
 
@@ -615,14 +590,171 @@ class _RoomViewBody extends State<RoomViewBody> {
       },
     );
   }
+  void _handleSeatTap(int seatIndex, ZegoUIKitUser? user, bool isLocked) {
+    final bool isEmpty = user == null;
+    final bool isOwner = MytypeInRoom == "owner" ||
+        MytypeInRoom == "admin" ||
+        _auth.currentUser!.uid == roomOwnerUID;
+    final bool isMySeat = !isEmpty && user!.id == _auth.currentUser!.uid;
+
+    if (isMySeat) {
+      RemoveMe();
+    } else if (isOwner) {
+      if (isEmpty) {
+        _showEmptySeatMenu(seatIndex, isLocked);
+      } else {
+        _showOccupiedSeatMenu(user!);
+      }
+    } else {
+      if (isEmpty && !isLocked) {
+        controller.takeSeat(seatIndex);
+      }
+    }
+  }
+
+  void _showEmptySeatMenu(int seatIndex, bool isLocked) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.mic, color: Color(0xFFFFD700)),
+              title: const Text('الانتقال إلى هذا المقعد',
+                  style: TextStyle(color: Colors.white)),
+              onTap: () async {
+                Navigator.pop(context);
+                await controller.leaveSeat(showDialog: false);
+                controller.takeSeat(seatIndex);
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                isLocked ? Icons.lock_open : Icons.lock,
+                color: const Color(0xFFFFD700),
+              ),
+              title: Text(
+                isLocked ? 'فتح المقعد' : 'قفل المقعد',
+                style: const TextStyle(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                isLocked ? openSeat(seatIndex) : closeSeat(seatIndex);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_add, color: Color(0xFFFFD700)),
+              title: const Text('دعوة عضو للمقعد',
+                  style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                _showInviteMemberSheet(context, seatIndex);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showOccupiedSeatMenu(ZegoUIKitUser user) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.mic_off, color: Color(0xFFFFD700)),
+              title: const Text('كتم المايك',
+                  style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                controller.turnMicrophoneOn(false, userID: user.id);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.airline_seat_recline_normal,
+                  color: Color(0xFFFFD700)),
+              title: const Text('إنزال من المقعد',
+                  style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                controller.removeSpeakerFromSeat(user.id);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showInviteMemberSheet(
+      BuildContext context, int seatIndex) async {
+    final snap = await _firestore
+        .collection('room')
+        .doc(widget.roomID)
+        .collection('user')
+        .get();
+
+    final members = snap.docs
+        .where((d) =>
+            d.get('id') != _auth.currentUser!.uid &&
+            !userSeats.contains(d.get('id')))
+        .toList();
+
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: members.isEmpty
+            ? const ListTile(
+                title: Text('لا يوجد أعضاء للدعوة',
+                    style: TextStyle(color: Colors.white54)),
+              )
+            : ListView.builder(
+                shrinkWrap: true,
+                itemCount: members.length,
+                itemBuilder: (_, i) => ListTile(
+                  leading: const Icon(Icons.person, color: Colors.white70),
+                  title: Text(
+                    members[i].get('name') ?? '',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    controller.inviteAudienceToTakeSeat(members[i].get('id'));
+                  },
+                ),
+              ),
+      ),
+    );
+  }
+
   // Function to check if a seat is open
   bool isSeatOpen(int seatIndex) {
-    return lockedSeats.contains(seatIndex);
+    return !lockedSeats.contains(seatIndex);
   }
 
   // Function to open a seat
   void openSeat(int seatIndex) {
-    if (widget.isHost && isSeatOpen(seatIndex)) {
+    if (!isSeatOpen(seatIndex)) {
       // Implement logic to open the seat
       setState(() {
         lockedSeats.remove(seatIndex);
@@ -635,7 +767,7 @@ class _RoomViewBody extends State<RoomViewBody> {
 
   // Function to close a seat
   void closeSeat(int seatIndex) {
-    if (widget.isHost && !isSeatOpen(seatIndex)) {
+    if (isSeatOpen(seatIndex)) {
       // Implement logic to close the seat
       setState(() {
         lockedSeats.add(seatIndex);
@@ -1365,18 +1497,27 @@ class _RoomViewBody extends State<RoomViewBody> {
   }
   void RemoveMe() {
     showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-              title: Text("Remove From Seat"),
-              content: Container(
-                  height: 220,
-                  child: ElevatedButton(onPressed: (){
-                    controller.removeSpeakerFromSeat(_auth.currentUser!.uid);
-                  }, child: Text("UnTake Seat"))
-              )
-          );
-        });
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text('النزول من المقعد',
+            style: TextStyle(color: Colors.white)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إلغاء', style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              controller.leaveSeat(showDialog: false);
+            },
+            child: const Text('نزول',
+                style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
   }
   void ShowNumberSeat() {
     showDialog(
@@ -1445,7 +1586,7 @@ class _RoomViewBody extends State<RoomViewBody> {
           fontSize: 12,
           fontWeight: FontWeight.w500,
         );
-        final listMenu =widget.isHost
+        final listMenu =MytypeInRoom=="owner"
             ? [
           GestureDetector(
             onTap: () async {

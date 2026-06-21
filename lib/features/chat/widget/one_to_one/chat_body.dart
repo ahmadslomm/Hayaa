@@ -9,12 +9,12 @@ import 'package:image/image.dart' as img;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:hayaa_main/models/firends_model.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:modal_progress_hud_nsn/modal_progress_hud_nsn.dart';
 import 'package:svgaplayer_flutter/player.dart';
+import '../../../../core/Utils/supabase_helper.dart';
 import '../../../../models/massege_model.dart';
 import '../../../../models/recorder_model.dart';
 import '../../../../models/user_model.dart';
@@ -450,47 +450,6 @@ class _ChatBody extends State<ChatBody> {
               Column(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  // Offstage(
-                  //   offstage: !emojiShowing,
-                  //   child: SizedBox(
-                  //     height: 250,
-                  //     child: EmojiPicker(
-                  //       textEditingController: _controller,
-                  //       config: Config(
-                  //         columns: 7,
-                  //         emojiSizeMax: 32 *
-                  //             (defaultTargetPlatform ==
-                  //                 TargetPlatform.iOS
-                  //                 ? 1.30
-                  //                 : 1.0),
-                  //         verticalSpacing: 0,
-                  //         horizontalSpacing: 0,
-                  //         gridPadding: EdgeInsets.zero,
-                  //         bgColor: const Color(0xFFF2F2F2),
-                  //         indicatorColor: Colors.blue,
-                  //         iconColor: Colors.grey,
-                  //         iconColorSelected: Colors.blue,
-                  //         backspaceColor: Colors.blue,
-                  //         skinToneDialogBgColor: Colors.white,
-                  //         skinToneIndicatorColor: Colors.grey,
-                  //         enableSkinTones: true,
-                  //         recentsLimit: 28,
-                  //         replaceEmojiOnLimitExceed: false,
-                  //         noRecents: const Text(
-                  //           'No Recents',
-                  //           style:
-                  //           TextStyle(fontSize: 20, color: Colors.black26),
-                  //           textAlign: TextAlign.center,
-                  //         ),
-                  //         loadingIndicator: const SizedBox.shrink(),
-                  //         tabIndicatorAnimDuration: kTabScrollDuration,
-                  //         categoryIcons: const CategoryIcons(),
-                  //         buttonMode: ButtonMode.MATERIAL,
-                  //         checkPlatformCompatibility: true,
-                  //       ),
-                  //     ),
-                  //   ),
-                  // ),
                 ],
               )
             ],
@@ -566,11 +525,6 @@ class _ChatBody extends State<ChatBody> {
       docRef2.update(updates2);
       print(message);
     }
-    // sendNotification(
-    //     widget.us.devicetoken,
-    //     widget.source.name,
-    //     message
-    // );
     print("Massege Send");
     print(chatID);
   }
@@ -585,11 +539,7 @@ class _ChatBody extends State<ChatBody> {
     img.Image compressedImage = img.copyResize(image, width: 800);
     File compressedFile = File('${_image!.path}_compressed.jpg')
       ..writeAsBytesSync(img.encodeJpg(compressedImage));
-    final path = "chat/photos/${_auth.currentUser!.uid}-${DateTime.now().toString()}.jpg";
-    final ref = FirebaseStorage.instance.ref().child(path);
-    final uploadTask = ref.putFile(compressedFile);
-    final snapshot = await uploadTask.whenComplete(() {});
-    final urlDownload = await snapshot.ref.getDownloadURL();
+    final urlDownload = await SupabaseHelper.uploadImage(compressedFile);
     print("Download Link : $urlDownload");
     final id = DateTime.now().toString();
     String idd = "$id-$sourceId";
@@ -625,15 +575,6 @@ class _ChatBody extends State<ChatBody> {
     setState(() {
       _showspinner = false;
     });
-    // setState(() {
-    //   Navigator.pop(context);
-    //   _showspinner = false;
-    // });
-    // sendNotification(
-    //     widget.us.devicetoken,
-    //     widget.source.name,
-    //     image!.name
-    // );
   }
   Widget bottomSheet() {
     return SizedBox(
@@ -714,8 +655,7 @@ class _ChatBody extends State<ChatBody> {
                                   };
                                   docRef.update(updates);
                                   idUser = "${widget.friend.docID}${_auth.currentUser!.uid}";
-                                  final docRef2 = _firestore.collection("contacts").doc(idUser);
-                                  final updates2 = <String, dynamic>{
+                                  final docRef2 = _firestore.collection("contacts").doc(idUser);                                  final updates2 = <String, dynamic>{
                                     "lastmsg": "gift",
                                     'time': DateTime.now().toString().substring(10, 16),
                                     'type': "msg",

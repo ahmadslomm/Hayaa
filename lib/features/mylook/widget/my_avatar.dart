@@ -177,8 +177,8 @@ class _MyAvatar extends State<MyAvatar>{
                       }
                     },
                     style: ElevatedButton.styleFrom(
-                      primary: mycar==ss.docID?Colors.red:Colors.grey,
-                      onPrimary: Colors.white,
+                      backgroundColor: mycar==ss.docID?Colors.red:Colors.grey,
+                      foregroundColor: Colors.white,
                       elevation: 5,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),

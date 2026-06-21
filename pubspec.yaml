@@ -74,6 +74,7 @@ dependencies:
   import_sorter: ^4.6.0
   dart_code_metrics: ^5.7.6
   flutter_svg: ^2.0.9
+  http: ^0.13.6
 
 flutter_icons:
   android: true
