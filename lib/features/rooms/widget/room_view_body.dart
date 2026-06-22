@@ -73,6 +73,7 @@ class _RoomViewBody extends State<RoomViewBody> {
   StreamSubscription? _userSub;
   StreamSubscription? _blockSub;
   StreamSubscription? _myUserSub;
+  StreamSubscription? _roomUsersSub;
 
   // Session timer
   DateTime? _sessionStart;
@@ -82,6 +83,11 @@ class _RoomViewBody extends State<RoomViewBody> {
   // Quick reactions
   final List<_FloatingEmoji> _floatingEmojis = [];
 
+  // VIP welcome banner
+  bool _roomUsersInitialized = false;
+  _VipEntry? _vipWelcome;
+  final Set<String> _seenUsers = {};
+
   @override
   void initState() {
     super.initState();
@@ -89,6 +95,7 @@ class _RoomViewBody extends State<RoomViewBody> {
     _listenRoomData();
     _listenMyUserData();
     _listenBlock();
+    _listenVipEntrances();
     _sessionStart = DateTime.now();
     _sessionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
@@ -106,6 +113,7 @@ class _RoomViewBody extends State<RoomViewBody> {
     _userSub?.cancel();
     _blockSub?.cancel();
     _myUserSub?.cancel();
+    _roomUsersSub?.cancel();
     for (var n in _focusNodes) {
       n.dispose();
     }
@@ -215,6 +223,55 @@ class _RoomViewBody extends State<RoomViewBody> {
       if (snap.size != 0 && MytypeInRoom != "owner" && mounted) {
         controller.leave(context, showConfirmation: false);
       }
+    });
+  }
+
+  /// Watches the room user list and shows a welcome banner when a VIP enters.
+  void _listenVipEntrances() {
+    _roomUsersSub = _firestore
+        .collection('room')
+        .doc(widget.roomID)
+        .collection('user')
+        .snapshots()
+        .listen((snap) {
+      for (final change in snap.docChanges) {
+        if (change.type != DocumentChangeType.added) continue;
+        final data = change.doc.data();
+        if (data == null) continue;
+        final uid = data['id'] ?? change.doc.id;
+        // Skip the users already present when we joined.
+        if (!_roomUsersInitialized) {
+          _seenUsers.add(uid);
+          continue;
+        }
+        if (_seenUsers.contains(uid)) continue;
+        _seenUsers.add(uid);
+        _maybeWelcomeVip(uid);
+      }
+      _roomUsersInitialized = true;
+    });
+  }
+
+  Future<void> _maybeWelcomeVip(String uid) async {
+    final userSnap = await _firestore
+        .collection('user')
+        .where('doc', isEqualTo: uid)
+        .limit(1)
+        .get();
+    if (userSnap.docs.isEmpty || !mounted) return;
+    final d = userSnap.docs.first;
+    final vip = int.tryParse(d.get('vip')?.toString() ?? '0') ?? 0;
+    if (vip < 1) return; // only VIP members get a grand entrance
+    setState(() {
+      _vipWelcome = _VipEntry(
+        name: d.get('name') ?? '',
+        photo: d.get('photo') ?? '',
+        vip: vip,
+      );
+    });
+    Future.delayed(const Duration(seconds: 4), () {
+      if (!mounted) return;
+      setState(() => _vipWelcome = null);
     });
   }
 
@@ -808,6 +865,9 @@ class _RoomViewBody extends State<RoomViewBody> {
                   ),
                 ),
               ),
+              // Top supporters (top 3)
+              _buildTopSupporters(),
+              const SizedBox(width: 6),
               // Online count badge
               StreamBuilder<QuerySnapshot>(
                 stream: _firestore
@@ -841,6 +901,14 @@ class _RoomViewBody extends State<RoomViewBody> {
             ],
           ),
         ),
+        // VIP welcome banner
+        if (_vipWelcome != null)
+          Positioned(
+            top: 70,
+            left: 0,
+            right: 0,
+            child: _VipWelcomeBanner(entry: _vipWelcome!),
+          ),
         // Session timer badge
         Positioned(
           bottom: 200,
@@ -1122,6 +1190,175 @@ class _RoomViewBody extends State<RoomViewBody> {
     if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
     if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}K';
     return n.toString();
+  }
+
+  /// Top-3 supporters avatars, tappable to open the full ranking sheet.
+  Widget _buildTopSupporters() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('room')
+          .doc(widget.roomID)
+          .collection('supporters')
+          .orderBy('total', descending: true)
+          .limit(3)
+          .snapshots(),
+      builder: (context, snap) {
+        if (!snap.hasData || snap.data!.docs.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final docs = snap.data!.docs;
+        return GestureDetector(
+          onTap: _showSupportersSheet,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            decoration: BoxDecoration(
+              color: Colors.black45,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('🏆', style: TextStyle(fontSize: 12)),
+                const SizedBox(width: 4),
+                ...List.generate(docs.length, (i) {
+                  final photo = docs[i].get('photo') ?? '';
+                  final rankColor = i == 0
+                      ? _gold
+                      : i == 1
+                          ? const Color(0xFFC0C0C0)
+                          : const Color(0xFFCD7F32);
+                  return Padding(
+                    padding: EdgeInsets.only(left: i == 0 ? 0 : 2),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: rankColor, width: 1.5),
+                      ),
+                      child: CircleAvatar(
+                        radius: 10,
+                        backgroundImage: photo.toString().isNotEmpty
+                            ? CachedNetworkImageProvider(photo)
+                            : null,
+                        backgroundColor: Colors.grey[700],
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showSupportersSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: SizedBox(
+          height: 400,
+          child: Column(
+            children: [
+              _handle(),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text('🏆', style: TextStyle(fontSize: 18)),
+                    const SizedBox(width: 6),
+                    Text('كبار الداعمين',
+                        style: TextStyle(
+                            color: _gold,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: _firestore
+                      .collection('room')
+                      .doc(widget.roomID)
+                      .collection('supporters')
+                      .orderBy('total', descending: true)
+                      .limit(50)
+                      .snapshots(),
+                  builder: (context, snap) {
+                    if (!snap.hasData) {
+                      return const Center(
+                          child: CircularProgressIndicator());
+                    }
+                    final docs = snap.data!.docs;
+                    if (docs.isEmpty) {
+                      return const Center(
+                          child: Text('لا يوجد داعمون بعد',
+                              style: TextStyle(color: Colors.white54)));
+                    }
+                    return ListView.builder(
+                      itemCount: docs.length,
+                      itemBuilder: (context, i) {
+                        final d = docs[i];
+                        final name = d.get('name') ?? '';
+                        final photo = d.get('photo') ?? '';
+                        final total = d.get('total')?.toString() ?? '0';
+                        final rankColor = i == 0
+                            ? _gold
+                            : i == 1
+                                ? const Color(0xFFC0C0C0)
+                                : i == 2
+                                    ? const Color(0xFFCD7F32)
+                                    : Colors.white24;
+                        return ListTile(
+                          leading: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: 22,
+                                child: Text('${i + 1}',
+                                    style: TextStyle(
+                                        color: rankColor,
+                                        fontWeight: FontWeight.bold)),
+                              ),
+                              CircleAvatar(
+                                radius: 18,
+                                backgroundImage: photo.toString().isNotEmpty
+                                    ? CachedNetworkImageProvider(photo)
+                                    : null,
+                                backgroundColor: Colors.grey[700],
+                              ),
+                            ],
+                          ),
+                          title: Text(name,
+                              style: const TextStyle(color: Colors.white)),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.diamond,
+                                  color: Color(0xFFFFA726), size: 14),
+                              const SizedBox(width: 4),
+                              Text(_formatCount(total),
+                                  style: const TextStyle(
+                                      color: _gold,
+                                      fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildAvatar(Size size, ZegoUIKitUser? user) {
@@ -1768,6 +2005,20 @@ class _RoomViewBody extends State<RoomViewBody> {
         .collection('sendgift')
         .add({'giftid': gift.docID, 'target': receiverUID});
 
+    // Top-supporters tracking (cumulative spend per sender in this room)
+    await _firestore
+        .collection('room')
+        .doc(widget.roomID)
+        .collection('supporters')
+        .doc(_auth.currentUser!.uid)
+        .set({
+      'uid': _auth.currentUser!.uid,
+      'name': _auth.currentUser!.displayName ?? widget.username,
+      'photo': _auth.currentUser!.photoURL ?? '',
+      'total': FieldValue.increment(price),
+      'updated': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
     // Clear gift display after 4 seconds
     Future.delayed(const Duration(seconds: 4), () {
       if (!mounted) return;
@@ -2381,6 +2632,131 @@ class _RoomViewBody extends State<RoomViewBody> {
       decoration: BoxDecoration(
         color: Colors.white30,
         borderRadius: BorderRadius.circular(2),
+      ),
+    );
+  }
+}
+
+// ─── VIP entrance data model ───
+class _VipEntry {
+  final String name;
+  final String photo;
+  final int vip;
+  const _VipEntry({required this.name, required this.photo, required this.vip});
+}
+
+// ─── Animated VIP welcome banner ───
+class _VipWelcomeBanner extends StatefulWidget {
+  final _VipEntry entry;
+  const _VipWelcomeBanner({required this.entry});
+  @override
+  State<_VipWelcomeBanner> createState() => _VipWelcomeBannerState();
+}
+
+class _VipWelcomeBannerState extends State<_VipWelcomeBanner>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<Offset> _slide;
+  late Animation<double> _fade;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 600));
+    _slide = Tween<Offset>(begin: const Offset(-1.2, 0), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack));
+    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeIn);
+    _ctrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const gold = Color(0xFFFFD700);
+    return SlideTransition(
+      position: _slide,
+      child: FadeTransition(
+        opacity: _fade,
+        child: Center(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
+              ),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: gold, width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                  color: gold.withOpacity(0.4),
+                  blurRadius: 12,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircleAvatar(
+                  radius: 16,
+                  backgroundImage: widget.entry.photo.isNotEmpty
+                      ? CachedNetworkImageProvider(widget.entry.photo)
+                      : null,
+                  backgroundColor: Colors.grey[700],
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: gold,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text('VIP ${widget.entry.vip}',
+                                style: const TextStyle(
+                                    color: Colors.black,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold)),
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              widget.entry.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Text('دخل الغرفة بأناقة ✨',
+                          style:
+                              TextStyle(color: Colors.white70, fontSize: 10)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
