@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -22,36 +23,42 @@ class _StoryViewBody extends State<StoryViewBody>{
   XFile? image;
   DateTime now=DateTime.now();
   UserModel us=UserModel("email", "name", "gender", "photo", "id", "phonenumber", "devicetoken", "daimond", "vip", "bio", "seen", "lang", "country", "type", "birthdate", "coin", "exp", "level");
+  StreamSubscription? _dataSub;
   @override
   void initState() {
-    // TODO: implement initState
     super.initState();
     getMyData();
   }
-  void getMyData()async{
-    await for(var snap in _firestore.collection('user').doc(_auth.currentUser!.uid).snapshots()){
-      us.bio=snap.get('bio');
-      us.birthdate=snap.get('birthdate');
-      us.coin=snap.get('coin');
-      us.country=snap.get('country');
-      us.daimond=snap.get('daimond');
-      us.coin=snap.get('coin');
-      us.devicetoken=snap.get('devicetoken');
-      us.email=snap.get('email');
-      us.exp=snap.get('exp');
-      us.gender=snap.get('gender');
-      us.id=snap.get('id');
-      us.lang=snap.get('lang');
-      us.level=snap.get('level');
-      us.name=snap.get('name');
-      us.phonenumber=snap.get('phonenumber');
-      us.photo=snap.get('photo');
-      us.seen=snap.get('seen');
-      us.type=snap.get('type');
-      us.vip=snap.get('vip');
+  @override
+  void dispose() {
+    _dataSub?.cancel();
+    super.dispose();
+  }
+  void getMyData(){
+    _dataSub = _firestore.collection('user').doc(_auth.currentUser!.uid).snapshots().listen((snap){
+      if(!mounted || !snap.exists) return;
+      final d = snap.data() ?? {};
+      us.bio=d['bio'] ?? '';
+      us.birthdate=d['birthdate'] ?? '';
+      us.coin=d['coin'] ?? '0';
+      us.country=d['country'] ?? '';
+      us.daimond=d['daimond'] ?? '0';
+      us.devicetoken=d['devicetoken'] ?? '';
+      us.email=d['email'] ?? '';
+      us.exp=d['exp'] ?? '0';
+      us.gender=d['gender'] ?? '';
+      us.id=d['id'] ?? '';
+      us.lang=d['lang'] ?? 'ar';
+      us.level=d['level'] ?? '1';
+      us.name=d['name'] ?? '';
+      us.phonenumber=d['phonenumber'] ?? '';
+      us.photo=d['photo'] ?? '';
+      us.seen=d['seen']?.toString() ?? '';
+      us.type=d['type'] ?? '';
+      us.vip=d['vip'] ?? '0';
       us.docID=snap.id;
-      us.myfamily=snap.get('myfamily');
-    }
+      us.myfamily=d['myfamily'] ?? '';
+    });
   }
   @override
   Widget build(BuildContext context) {
