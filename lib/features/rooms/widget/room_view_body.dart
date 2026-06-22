@@ -98,6 +98,7 @@ class _RoomViewBody extends State<RoomViewBody> {
     _listenMyUserData();
     _listenBlock();
     _listenVipEntrances();
+    _logRoomEvent('➕ انضم ${widget.username}');
     _sessionStart = DateTime.now();
     _sessionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
@@ -376,6 +377,7 @@ class _RoomViewBody extends State<RoomViewBody> {
                       _buildAnnouncementButton(),
                       _buildStopMusicButton(),
                       _buildApplauseButton(),
+                      _buildAdminButton(),
                     ],
                     speakerButtons: [
                       ZegoMenuBarButtonName.toggleMicrophoneButton,
@@ -412,9 +414,36 @@ class _RoomViewBody extends State<RoomViewBody> {
       if (!isEmpty) {
         _showUserProfileCard(user!);
       } else if (!isLocked) {
-        controller.takeSeat(seatIndex);
+        if (micMode == 'request') {
+          _requestSeat(seatIndex);
+        } else {
+          controller.takeSeat(seatIndex);
+        }
       }
     }
+  }
+
+  /// In request-mic mode, audience sends a seat request to the host instead
+  /// of taking the seat directly.
+  void _requestSeat(int seatIndex) {
+    _firestore
+        .collection('room')
+        .doc(widget.roomID)
+        .collection('seatRequests')
+        .doc(_auth.currentUser!.uid)
+        .set({
+      'uid': _auth.currentUser!.uid,
+      'name': widget.username,
+      'photo': _auth.currentUser!.photoURL ?? '',
+      'seatIndex': seatIndex,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('تم إرسال طلب الصعود للمالك'),
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   void _showEmptySeatMenu(int seatIndex, bool isLocked) {
@@ -483,7 +512,7 @@ class _RoomViewBody extends State<RoomViewBody> {
                   style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
-                controller.turnMicrophoneOn(false, userID: user.id);
+                _muteUser(user);
               },
             ),
             ListTile(
@@ -2094,7 +2123,7 @@ class _RoomViewBody extends State<RoomViewBody> {
             style: style,
             onTap: () {
               Navigator.pop(context);
-              controller.turnMicrophoneOn(false, userID: user.id);
+              _muteUser(user);
             },
           ));
           // Invite to seat
@@ -2121,6 +2150,7 @@ class _RoomViewBody extends State<RoomViewBody> {
                   .collection('user')
                   .doc(user.id)
                   .delete();
+              _logRoomEvent('🚪 تم طرد ${user.name}');
               controller.message.send('تم طرد ${user.name} من الغرفة');
             },
           ));
@@ -2224,9 +2254,332 @@ class _RoomViewBody extends State<RoomViewBody> {
             .collection('user')
             .doc(userId)
             .delete();
+        _logRoomEvent('🚫 تم حظر $userName');
         controller.message.send('تم حظر $userName من الغرفة 🚫');
       });
     });
+  }
+
+  /// Mutes a user's mic and records them in the room muted list.
+  void _muteUser(ZegoUIKitUser user) {
+    controller.turnMicrophoneOn(false, userID: user.id);
+    _firestore
+        .collection('room')
+        .doc(widget.roomID)
+        .collection('muted')
+        .doc(user.id)
+        .set({'name': user.name, 'photo': ''});
+    _logRoomEvent('🔇 تم كتم ${user.name}');
+  }
+
+  /// Appends an entry to the room activity log (auto-pruned client-side view).
+  void _logRoomEvent(String text) {
+    _firestore
+        .collection('room')
+        .doc(widget.roomID)
+        .collection('events')
+        .add({
+      'text': text,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+  }
+
+  // ─────────────────────────────────────────────
+  // ADMIN & SECURITY PANEL
+  // ─────────────────────────────────────────────
+
+  Widget _buildAdminButton() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        CircleAvatar(
+          backgroundColor: Colors.white,
+          child: IconButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _showAdminPanel();
+            },
+            icon: const Icon(Icons.shield_outlined, color: Colors.black),
+          ),
+        ),
+        const Text('إدارة',
+            style: TextStyle(color: Colors.white, fontSize: 8)),
+      ],
+    );
+  }
+
+  void _showAdminPanel() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1A1A2E),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: DefaultTabController(
+          length: 4,
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.7,
+            child: Column(
+              children: [
+                _handle(),
+                TabBar(
+                  isScrollable: true,
+                  indicatorColor: _gold,
+                  labelColor: _gold,
+                  unselectedLabelColor: Colors.white54,
+                  tabs: const [
+                    Tab(text: 'الميكروفون'),
+                    Tab(text: 'الطلبات'),
+                    Tab(text: 'المكتومون'),
+                    Tab(text: 'السجل'),
+                  ],
+                ),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      _buildMicModeTab(),
+                      _buildSeatRequestsTab(),
+                      _buildMutedTab(),
+                      _buildEventLogTab(),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMicModeTab() {
+    return StatefulBuilder(
+      builder: (context, setSheet) {
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('وضع الميكروفون',
+                  style: TextStyle(color: Colors.white, fontSize: 15)),
+              const SizedBox(height: 12),
+              _micModeOption('free', 'حر', 'أي عضو يصعد المقعد مباشرة',
+                  Icons.lock_open, setSheet),
+              const SizedBox(height: 8),
+              _micModeOption('request', 'بطلب', 'يحتاج العضو موافقة المالك للصعود',
+                  Icons.front_hand, setSheet),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _micModeOption(String id, String name, String desc, IconData icon,
+      void Function(void Function()) setSheet) {
+    final isSelected = micMode == id;
+    return GestureDetector(
+      onTap: () {
+        _firestore
+            .collection('room')
+            .doc(widget.roomID)
+            .update({'micMode': id}).then((_) {
+          setState(() => micMode = id);
+          setSheet(() {});
+          controller.message.send(
+              id == 'request' ? '🎙️ الميك أصبح بطلب' : '🎙️ الميك أصبح حراً');
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: isSelected ? _gold.withOpacity(0.15) : Colors.white10,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: isSelected ? _gold : Colors.transparent, width: 1.5),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: isSelected ? _gold : Colors.white54),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold)),
+                  Text(desc,
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 11)),
+                ],
+              ),
+            ),
+            if (isSelected) const Icon(Icons.check_circle, color: _gold),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSeatRequestsTab() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('room')
+          .doc(widget.roomID)
+          .collection('seatRequests')
+          .snapshots(),
+      builder: (context, snap) {
+        if (!snap.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final docs = snap.data!.docs;
+        if (docs.isEmpty) {
+          return const Center(
+              child: Text('لا توجد طلبات صعود',
+                  style: TextStyle(color: Colors.white54)));
+        }
+        return ListView.builder(
+          itemCount: docs.length,
+          itemBuilder: (context, i) {
+            final d = docs[i];
+            final uid = d.get('uid') ?? d.id;
+            final name = d.get('name') ?? '';
+            final photo = d.get('photo') ?? '';
+            return ListTile(
+              leading: CircleAvatar(
+                radius: 18,
+                backgroundImage: photo.toString().isNotEmpty
+                    ? CachedNetworkImageProvider(photo)
+                    : null,
+                backgroundColor: Colors.grey[700],
+              ),
+              title: Text(name, style: const TextStyle(color: Colors.white)),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.check_circle,
+                        color: Color(0xFF4CFF6A)),
+                    onPressed: () {
+                      controller.inviteAudienceToTakeSeat(uid);
+                      _firestore
+                          .collection('room')
+                          .doc(widget.roomID)
+                          .collection('seatRequests')
+                          .doc(d.id)
+                          .delete();
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.cancel, color: Colors.redAccent),
+                    onPressed: () {
+                      _firestore
+                          .collection('room')
+                          .doc(widget.roomID)
+                          .collection('seatRequests')
+                          .doc(d.id)
+                          .delete();
+                    },
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildMutedTab() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('room')
+          .doc(widget.roomID)
+          .collection('muted')
+          .snapshots(),
+      builder: (context, snap) {
+        if (!snap.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final docs = snap.data!.docs;
+        if (docs.isEmpty) {
+          return const Center(
+              child: Text('لا يوجد مكتومون',
+                  style: TextStyle(color: Colors.white54)));
+        }
+        return ListView.builder(
+          itemCount: docs.length,
+          itemBuilder: (context, i) {
+            final d = docs[i];
+            final name = d.get('name') ?? '';
+            final photo = d.get('photo') ?? '';
+            final uid = d.id;
+            return ListTile(
+              leading: CircleAvatar(
+                radius: 18,
+                backgroundImage: photo.toString().isNotEmpty
+                    ? CachedNetworkImageProvider(photo)
+                    : null,
+                backgroundColor: Colors.grey[700],
+              ),
+              title: Text(name, style: const TextStyle(color: Colors.white)),
+              trailing: TextButton(
+                onPressed: () {
+                  controller.turnMicrophoneOn(true, userID: uid);
+                  _firestore
+                      .collection('room')
+                      .doc(widget.roomID)
+                      .collection('muted')
+                      .doc(uid)
+                      .delete();
+                },
+                child: const Text('فك الكتم',
+                    style: TextStyle(color: _gold)),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildEventLogTab() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('room')
+          .doc(widget.roomID)
+          .collection('events')
+          .orderBy('timestamp', descending: true)
+          .limit(40)
+          .snapshots(),
+      builder: (context, snap) {
+        if (!snap.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final docs = snap.data!.docs;
+        if (docs.isEmpty) {
+          return const Center(
+              child: Text('لا توجد أحداث',
+                  style: TextStyle(color: Colors.white54)));
+        }
+        return ListView.builder(
+          itemCount: docs.length,
+          itemBuilder: (context, i) {
+            final text = docs[i].get('text') ?? '';
+            return ListTile(
+              dense: true,
+              leading: const Icon(Icons.circle, color: _gold, size: 8),
+              title: Text(text,
+                  style: const TextStyle(color: Colors.white, fontSize: 13)),
+            );
+          },
+        );
+      },
+    );
   }
 
   // ─────────────────────────────────────────────
