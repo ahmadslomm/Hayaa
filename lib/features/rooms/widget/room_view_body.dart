@@ -49,6 +49,8 @@ class _RoomViewBody extends State<RoomViewBody> {
   String viewID = "";
   String bio = "";
   String layoutSeats = "";
+  String roomLayoutType = "party"; // party | podcast | wedding | debate | singing
+  String micMode = "free"; // free | request
   String wallpaper =
       "https://firebasestorage.googleapis.com/v0/b/hayaa-161f5.appspot.com/o/rooms%2Fclose-up-microphone-pop-filter-studio.jpg?alt=media&token=c9014900-dba7-4e7c-80c4-8d9fc6055462";
 
@@ -197,17 +199,20 @@ class _RoomViewBody extends State<RoomViewBody> {
         .snapshots()
         .listen((snap) {
       if (!snap.exists || !mounted) return;
+      final data = snap.data() ?? {};
       setState(() {
-        wallpaper = snap.get('wallpaper') ?? wallpaper;
-        viewID = snap.get('id') ?? '';
-        bio = snap.get('bio') ?? '';
-        layoutSeats = snap.get('seat') ?? '9';
-        pass = snap.get('password') ?? '';
-        giftMedia = snap.get('gift') ?? '';
-        gifttype = snap.get('gifttype') ?? '';
-        carMedia = snap.get('car') ?? '';
-        cartype = snap.get('cartype') ?? '';
-        roomOwnerUID = snap.get('owner') ?? '';
+        wallpaper = data['wallpaper'] ?? wallpaper;
+        viewID = data['id'] ?? '';
+        bio = data['bio'] ?? '';
+        layoutSeats = data['seat'] ?? '9';
+        roomLayoutType = data['layoutType'] ?? 'party';
+        micMode = data['micMode'] ?? 'free';
+        pass = data['password'] ?? '';
+        giftMedia = data['gift'] ?? '';
+        gifttype = data['gifttype'] ?? '';
+        carMedia = data['car'] ?? '';
+        cartype = data['cartype'] ?? '';
+        roomOwnerUID = data['owner'] ?? '';
       });
     });
   }
@@ -1448,7 +1453,33 @@ class _RoomViewBody extends State<RoomViewBody> {
   // LAYOUT ROWS
   // ─────────────────────────────────────────────
 
+  ZegoLiveAudioRoomLayoutRowConfig _row(int count) =>
+      ZegoLiveAudioRoomLayoutRowConfig(
+        count: count,
+        alignment: count == 1
+            ? ZegoLiveAudioRoomLayoutAlignment.center
+            : ZegoLiveAudioRoomLayoutAlignment.spaceAround,
+      );
+
   List<ZegoLiveAudioRoomLayoutRowConfig> _buildLayoutRows() {
+    // Specialised layouts take priority over plain seat counts.
+    switch (roomLayoutType) {
+      case 'podcast':
+        // Host on top, a single spacious row of 4 guests.
+        return [_row(1), _row(4)];
+      case 'wedding':
+        // Bride & groom centre stage, guests around.
+        return [_row(1), _row(2), _row(4)];
+      case 'debate':
+        // Two opponents facing, audience below.
+        return [_row(2), _row(4), _row(4)];
+      case 'singing':
+        // Lead singer, then chorus.
+        return [_row(1), _row(4)];
+      case 'party':
+      default:
+        break;
+    }
     if (layoutSeats == '11') {
       return [
         ZegoLiveAudioRoomLayoutRowConfig(
@@ -1605,11 +1636,11 @@ class _RoomViewBody extends State<RoomViewBody> {
           backgroundColor: Colors.white,
           backgroundImage: AssetImage(AppImages.layout),
           child: InkWell(
-            onTap: () => _showSeatCountDialog(),
+            onTap: () => _showLayoutDialog(),
             child: Container(),
           ),
         ),
-        const Text('مقاعد',
+        const Text('النمط',
             style: TextStyle(color: Colors.white, fontSize: 8)),
       ],
     );
@@ -2381,6 +2412,94 @@ class _RoomViewBody extends State<RoomViewBody> {
                 style: TextStyle(color: Colors.black)),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showLayoutDialog() {
+    Navigator.maybePop(context);
+    const layouts = [
+      {'id': 'party', 'name': 'بارتي', 'icon': '🎉'},
+      {'id': 'podcast', 'name': 'بودكاست', 'icon': '🎙️'},
+      {'id': 'wedding', 'name': 'زفّة / VIP', 'icon': '💍'},
+      {'id': 'debate', 'name': 'مناظرة', 'icon': '⚔️'},
+      {'id': 'singing', 'name': 'غناء', 'icon': '🎤'},
+    ];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetContext) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _handle(),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text('نمط الغرفة',
+                    style: TextStyle(
+                        color: _gold,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold)),
+              ),
+              GridView.count(
+                shrinkWrap: true,
+                crossAxisCount: 3,
+                padding: const EdgeInsets.all(12),
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                children: layouts.map((l) {
+                  final isSelected = roomLayoutType == l['id'];
+                  return GestureDetector(
+                    onTap: () {
+                      _firestore
+                          .collection('room')
+                          .doc(widget.roomID)
+                          .update({'layoutType': l['id']}).then((_) {
+                        setState(() => roomLayoutType = l['id']!);
+                        Navigator.pop(sheetContext);
+                        if (l['id'] == 'party') _showSeatCountDialog();
+                      });
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: isSelected ? _gold.withOpacity(0.2) : Colors.white10,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                            color: isSelected ? _gold : Colors.transparent,
+                            width: 1.5),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(l['icon']!, style: const TextStyle(fontSize: 26)),
+                          const SizedBox(height: 6),
+                          Text(l['name']!,
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              if (roomLayoutType == 'party')
+                TextButton.icon(
+                  onPressed: () {
+                    Navigator.pop(sheetContext);
+                    _showSeatCountDialog();
+                  },
+                  icon: const Icon(Icons.event_seat, color: _gold),
+                  label: const Text('عدد المقاعد',
+                      style: TextStyle(color: _gold)),
+                ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        ),
       ),
     );
   }
