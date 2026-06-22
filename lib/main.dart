@@ -61,28 +61,13 @@ class _MyApp extends State<MyApp>with WidgetsBindingObserver{
   }
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if(state == AppLifecycleState.paused){
-      FirebaseFirestore firestore=FirebaseFirestore.instance;
-      FirebaseAuth auth = FirebaseAuth.instance;
-      firestore.collection("user").doc(auth.currentUser!.uid).update({
-        "seen":FieldValue.serverTimestamp(),
-      });
-      print("object");
-    }
-    else if(state == AppLifecycleState.inactive){
-      FirebaseFirestore firestore=FirebaseFirestore.instance;
-      FirebaseAuth auth = FirebaseAuth.instance;
-      firestore.collection("user").doc(auth.currentUser!.uid).update({
-        "seen":FieldValue.serverTimestamp(),
-      });
-      print("object");
-    }
-    else{
-      FirebaseFirestore firestore=FirebaseFirestore.instance;
-      FirebaseAuth auth = FirebaseAuth.instance;
-      firestore.collection("user").doc(auth.currentUser!.uid).update({
-        "seen":"online",
-      });
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final userDoc = FirebaseFirestore.instance.collection("user").doc(uid);
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      userDoc.update({"seen": FieldValue.serverTimestamp()});
+    } else if (state == AppLifecycleState.resumed) {
+      userDoc.update({"seen": "online"});
     }
   }
   @override

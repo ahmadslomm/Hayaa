@@ -74,6 +74,14 @@ class _RoomViewBody extends State<RoomViewBody> {
   StreamSubscription? _blockSub;
   StreamSubscription? _myUserSub;
 
+  // Session timer
+  DateTime? _sessionStart;
+  String _sessionDuration = '00:00';
+  Timer? _sessionTimer;
+
+  // Quick reactions
+  final List<_FloatingEmoji> _floatingEmojis = [];
+
   @override
   void initState() {
     super.initState();
@@ -81,10 +89,19 @@ class _RoomViewBody extends State<RoomViewBody> {
     _listenRoomData();
     _listenMyUserData();
     _listenBlock();
+    _sessionStart = DateTime.now();
+    _sessionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      final diff = DateTime.now().difference(_sessionStart!);
+      final m = diff.inMinutes.remainder(60).toString().padLeft(2, '0');
+      final s = diff.inSeconds.remainder(60).toString().padLeft(2, '0');
+      setState(() => _sessionDuration = '$m:$s');
+    });
   }
 
   @override
   void dispose() {
+    _sessionTimer?.cancel();
     _roomSub?.cancel();
     _userSub?.cancel();
     _blockSub?.cancel();
@@ -96,6 +113,22 @@ class _RoomViewBody extends State<RoomViewBody> {
       c.dispose();
     }
     super.dispose();
+  }
+
+  void _sendReaction(String emoji) {
+    controller.message.send(emoji);
+    final id = DateTime.now().millisecondsSinceEpoch;
+    final entry = _FloatingEmoji(
+      id: id,
+      emoji: emoji,
+      left: (MediaQuery.of(context).size.width * 0.1) +
+          (id % 5) * (MediaQuery.of(context).size.width * 0.15),
+    );
+    setState(() => _floatingEmojis.add(entry));
+    Future.delayed(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      setState(() => _floatingEmojis.removeWhere((e) => e.id == id));
+    });
   }
 
   void _listenUserInRoom() {
@@ -299,8 +332,8 @@ class _RoomViewBody extends State<RoomViewBody> {
                   ..onInviteAudienceToTakeSeatFailed = () {}
                   ..bottomMenuBarConfig = ZegoBottomMenuBarConfig(
                     maxCount: 6,
-                    audienceExtendButtons: [_buildGiftButton()],
-                    speakerExtendButtons: [_buildGiftButton()],
+                    audienceExtendButtons: [_buildGiftButton(), _buildApplauseButton()],
+                    speakerExtendButtons: [_buildGiftButton(), _buildApplauseButton()],
                     hostExtendButtons: [
                       _buildGiftButton(),
                       _buildPasswordButton(),
@@ -309,6 +342,7 @@ class _RoomViewBody extends State<RoomViewBody> {
                       _buildLayoutButton(),
                       _buildAnnouncementButton(),
                       _buildStopMusicButton(),
+                      _buildApplauseButton(),
                     ],
                     speakerButtons: [
                       ZegoMenuBarButtonName.toggleMicrophoneButton,
@@ -836,6 +870,58 @@ class _RoomViewBody extends State<RoomViewBody> {
             ],
           ),
         ),
+        // Session timer badge
+        Positioned(
+          bottom: 200,
+          left: 12,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.black54,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.timer, color: _gold, size: 14),
+                const SizedBox(width: 4),
+                Text(_sessionDuration,
+                    style: const TextStyle(color: Colors.white, fontSize: 12)),
+              ],
+            ),
+          ),
+        ),
+        // Quick reaction buttons
+        Positioned(
+          bottom: 200,
+          right: 8,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: ['❤️', '👏', '😂', '🔥', '🎉'].map((emoji) {
+              return GestureDetector(
+                onTap: () => _sendReaction(emoji),
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 4),
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: Colors.black45,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Center(
+                    child: Text(emoji, style: const TextStyle(fontSize: 18)),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        // Floating emoji animations
+        ..._floatingEmojis.map((e) => Positioned(
+              left: e.left,
+              bottom: 250,
+              child: _FloatingEmojiWidget(emoji: e.emoji),
+            )),
         // Gift animation overlay
         if (giftMedia.isNotEmpty)
           Center(
@@ -1136,6 +1222,26 @@ class _RoomViewBody extends State<RoomViewBody> {
           ),
         ),
         const Text('إيقاف',
+            style: TextStyle(color: Colors.white, fontSize: 8)),
+      ],
+    );
+  }
+
+  Widget _buildApplauseButton() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        CircleAvatar(
+          backgroundColor: Colors.white,
+          child: IconButton(
+            onPressed: () {
+              _sendReaction('👏');
+              controller.message.send('👏👏👏');
+            },
+            icon: const Text('👏', style: TextStyle(fontSize: 20)),
+          ),
+        ),
+        const Text('تصفيق',
             style: TextStyle(color: Colors.white, fontSize: 8)),
       ],
     );
@@ -2083,6 +2189,61 @@ class _RoomViewBody extends State<RoomViewBody> {
       decoration: BoxDecoration(
         color: Colors.white30,
         borderRadius: BorderRadius.circular(2),
+      ),
+    );
+  }
+}
+
+// ─── Floating emoji data model ───
+class _FloatingEmoji {
+  final int id;
+  final String emoji;
+  final double left;
+  const _FloatingEmoji({required this.id, required this.emoji, required this.left});
+}
+
+// ─── Animated floating emoji widget ───
+class _FloatingEmojiWidget extends StatefulWidget {
+  final String emoji;
+  const _FloatingEmojiWidget({required this.emoji});
+  @override
+  State<_FloatingEmojiWidget> createState() => _FloatingEmojiWidgetState();
+}
+
+class _FloatingEmojiWidgetState extends State<_FloatingEmojiWidget>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _opacity;
+  late Animation<double> _offset;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1800));
+    _opacity = Tween<double>(begin: 1, end: 0).animate(
+        CurvedAnimation(parent: _ctrl, curve: const Interval(0.6, 1.0)));
+    _offset = Tween<double>(begin: 0, end: -80).animate(
+        CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+    _ctrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (_, __) => Transform.translate(
+        offset: Offset(0, _offset.value),
+        child: Opacity(
+          opacity: _opacity.value,
+          child: Text(widget.emoji, style: const TextStyle(fontSize: 28)),
+        ),
       ),
     );
   }
