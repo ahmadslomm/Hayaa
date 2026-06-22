@@ -276,37 +276,8 @@ class _RoomViewBody extends State<RoomViewBody> {
                     foregroundBuilder: (_, size, user, extraInfo) {
                       final int seatIndex = extraInfo['seat_index'] ?? 0;
                       final bool isLocked = extraInfo['seat_status'] == 2;
-                      final bool isEmpty = user == null;
-                      return GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () =>
-                            _handleSeatTap(seatIndex, user, isLocked),
-                        child: SizedBox(
-                          width: size.width,
-                          height: size.height,
-                          child: isEmpty
-                              ? Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    if (isLocked)
-                                      Icon(Icons.lock,
-                                          color: const Color(0xFF888888),
-                                          size: size.width * 0.35)
-                                    else
-                                      Icon(Icons.mic_none,
-                                          color: Colors.white54,
-                                          size: size.width * 0.35),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      isLocked ? '' : '$seatIndex',
-                                      style: const TextStyle(
-                                          color: Colors.white54, fontSize: 11),
-                                    ),
-                                  ],
-                                )
-                              : const SizedBox.shrink(),
-                        ),
-                      );
+                      return _buildSeatForeground(
+                          size, user, seatIndex, isLocked);
                     },
                     closeIcon: null,
                     openIcon: null,
@@ -946,6 +917,213 @@ class _RoomViewBody extends State<RoomViewBody> {
     );
   }
 
+  // ─────────────────────────────────────────────
+  // MODERN SEAT SYSTEM
+  // ─────────────────────────────────────────────
+
+  /// Foreground overlay drawn on top of every seat (empty, locked or taken).
+  Widget _buildSeatForeground(
+      Size size, ZegoUIKitUser? user, int seatIndex, bool isLocked) {
+    final bool isEmpty = user == null;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _handleSeatTap(seatIndex, user, isLocked),
+      child: SizedBox(
+        width: size.width,
+        height: size.height,
+        child: isEmpty
+            ? _buildEmptySeat(size, seatIndex, isLocked)
+            : _buildOccupiedSeatOverlay(size, user, seatIndex),
+      ),
+    );
+  }
+
+  /// Empty or locked seat — gradient circle with mic / lock icon + seat number.
+  Widget _buildEmptySeat(Size size, int seatIndex, bool isLocked) {
+    final double avatarSize = size.width * 0.62;
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Container(
+          width: avatarSize,
+          height: avatarSize,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isLocked
+                  ? [const Color(0xFF2A2A3E), const Color(0xFF1A1A2E)]
+                  : [Colors.white12, Colors.white10],
+            ),
+            border: Border.all(
+              color: isLocked
+                  ? Colors.white12
+                  : _gold.withOpacity(0.35),
+              width: 1,
+            ),
+          ),
+          child: Icon(
+            isLocked ? Icons.lock : Icons.add,
+            color: isLocked ? const Color(0xFF888888) : _gold.withOpacity(0.8),
+            size: avatarSize * 0.45,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          isLocked ? 'مقفل' : '${seatIndex + 1}',
+          style: const TextStyle(
+            color: Colors.white60,
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Overlay on a taken seat: name, mic status, crown, gift counter, speaking ring.
+  Widget _buildOccupiedSeatOverlay(
+      Size size, ZegoUIKitUser user, int seatIndex) {
+    final bool isOwnerSeat = seatIndex == 0;
+    return Stack(
+      alignment: Alignment.center,
+      clipBehavior: Clip.none,
+      children: [
+        // Speaking ripple ring (driven by Zego sound level)
+        ValueListenableBuilder<double>(
+          valueListenable: ZegoUIKit().getSoundLevelNotifier(user.id),
+          builder: (context, level, _) {
+            final bool speaking = level > 10;
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: size.width * (speaking ? 0.78 : 0.66),
+              height: size.width * (speaking ? 0.78 : 0.66),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: speaking ? const Color(0xFF4CFF6A) : Colors.transparent,
+                  width: 2.5,
+                ),
+                boxShadow: speaking
+                    ? [
+                        BoxShadow(
+                          color: const Color(0xFF4CFF6A).withOpacity(0.5),
+                          blurRadius: 10,
+                          spreadRadius: 1,
+                        )
+                      ]
+                    : null,
+              ),
+            );
+          },
+        ),
+        // Crown for the owner seat
+        if (isOwnerSeat)
+          Positioned(
+            top: -size.height * 0.06,
+            child: const Text('👑', style: TextStyle(fontSize: 16)),
+          ),
+        // Microphone muted badge
+        Positioned(
+          right: size.width * 0.12,
+          top: size.height * 0.06,
+          child: ValueListenableBuilder<bool>(
+            valueListenable:
+                ZegoUIKit().getMicrophoneStateNotifier(user.id),
+            builder: (context, micOn, _) {
+              if (micOn) return const SizedBox.shrink();
+              return Container(
+                padding: const EdgeInsets.all(2),
+                decoration: const BoxDecoration(
+                  color: Colors.redAccent,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.mic_off,
+                    color: Colors.white, size: 11),
+              );
+            },
+          ),
+        ),
+        // Name + gift contribution counter at the bottom
+        Positioned(
+          bottom: -size.height * 0.04,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                constraints: BoxConstraints(maxWidth: size.width * 0.95),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: Colors.black45,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  user.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              _buildSeatGiftCounter(user.id, size),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Live diamond contribution counter for the seated user.
+  Widget _buildSeatGiftCounter(String uid, Size size) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('user')
+          .where('doc', isEqualTo: uid)
+          .snapshots(),
+      builder: (context, snap) {
+        if (!snap.hasData || snap.data!.docs.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final diamonds = snap.data!.docs.first.get('daimond') ?? '0';
+        return Container(
+          margin: const EdgeInsets.only(top: 1),
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+                colors: [Color(0xFFFFA726), Color(0xFFFF7043)]),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.diamond, color: Colors.white, size: 9),
+              const SizedBox(width: 2),
+              Text(
+                _formatCount(diamonds),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _formatCount(String raw) {
+    final n = int.tryParse(raw) ?? 0;
+    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
+    if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}K';
+    return n.toString();
+  }
+
   Widget _buildAvatar(Size size, ZegoUIKitUser? user) {
     if (user == null) return const SizedBox.shrink();
 
@@ -995,22 +1173,36 @@ class _RoomViewBody extends State<RoomViewBody> {
     return Stack(
       alignment: Alignment.center,
       children: [
+        // Photo (slightly inset so the frame can wrap it)
+        Container(
+          width: size.width - 23,
+          height: size.width - 23,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.3),
+                blurRadius: 4,
+              ),
+            ],
+          ),
+          child: CircleAvatar(
+            backgroundImage: photoUrl.isNotEmpty
+                ? CachedNetworkImageProvider(photoUrl)
+                : null,
+            backgroundColor: Colors.grey[700],
+            child: photoUrl.isEmpty
+                ? const Icon(Icons.person, color: Colors.white54)
+                : null,
+          ),
+        ),
+        // Decorative frame on top
         if (frameUrl.isNotEmpty)
           CircleAvatar(
             maxRadius: size.width,
             backgroundImage: CachedNetworkImageProvider(frameUrl),
             backgroundColor: Colors.transparent,
           ),
-        Container(
-          width: size.width - 23,
-          height: size.width - 23,
-          child: CircleAvatar(
-            backgroundImage: photoUrl.isNotEmpty
-                ? CachedNetworkImageProvider(photoUrl)
-                : null,
-            backgroundColor: Colors.grey[700],
-          ),
-        ),
       ],
     );
   }
