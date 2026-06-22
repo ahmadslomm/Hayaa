@@ -7,14 +7,12 @@ import 'package:zego_uikit/zego_uikit.dart';
 import 'core/Utils/app_routes.dart';
 import 'features/splash/views/splash_view.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 Future<void> main() async{
   WidgetsFlutterBinding.ensureInitialized();
   await EasyLocalization.ensureInitialized();
   await Firebase.initializeApp();
-  FirebaseMessaging messaging = FirebaseMessaging.instance;
   FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
   FlutterLocalNotificationsPlugin();
   var initializationSettingsAndroid =
@@ -49,15 +47,13 @@ class _MyApp extends State<MyApp>with WidgetsBindingObserver{
   FirebaseAnalyticsObserver(analytics: analytics);
   @override
   void initState() {
-    // TODO: implement initState
-    WidgetsBinding.instance.addObserver(this as WidgetsBindingObserver);
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
   }
   @override
   void dispose() {
-    // TODO: implement dispose
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
-    WidgetsBinding.instance.removeObserver(this as WidgetsBindingObserver);
   }
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {

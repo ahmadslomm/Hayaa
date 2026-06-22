@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -50,9 +51,9 @@ class _ChatBody extends State<ChatBody> {
   final recordMethod = Recorder();
   String firendType="";
   String friendAgency="";
+  StreamSubscription? _typeSub;
   @override
   void initState() {
-    // TODO: implement initState
     super.initState();
     CheckType();
     checkContact();
@@ -60,13 +61,20 @@ class _ChatBody extends State<ChatBody> {
     recordMethod.initRecorder();
   }
 
-  void CheckType()async{
-    await for(var snap in _firestore.collection('user').doc(widget.friend.docID).snapshots()){
-      print("hhhh");
-      firendType=snap.get('type');
-      friendAgency=snap.get('myagent');
+  @override
+  void dispose() {
+    _typeSub?.cancel();
+    audioPlayer.dispose();
+    super.dispose();
+  }
 
-    }
+  void CheckType(){
+    _typeSub = _firestore.collection('user').doc(widget.friend.docID).snapshots().listen((snap){
+      if(!mounted || !snap.exists) return;
+      final data = snap.data() ?? {};
+      firendType = data['type'] ?? '';
+      friendAgency = data['myagent'] ?? '';
+    });
   }
 
   void checkContact() async {
