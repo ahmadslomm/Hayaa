@@ -90,6 +90,12 @@ class _RoomViewBody extends State<RoomViewBody> {
   _VipEntry? _vipWelcome;
   final Set<String> _seenUsers = {};
 
+  // Flying messages
+  int myVip = 0;
+  StreamSubscription? _flyingSub;
+  bool _flyingInitialized = false;
+  final List<_FlyingMessage> _flyingMessages = [];
+
   @override
   void initState() {
     super.initState();
@@ -98,6 +104,7 @@ class _RoomViewBody extends State<RoomViewBody> {
     _listenMyUserData();
     _listenBlock();
     _listenVipEntrances();
+    _listenFlyingMessages();
     _logRoomEvent('➕ انضم ${widget.username}');
     _sessionStart = DateTime.now();
     _sessionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -117,6 +124,7 @@ class _RoomViewBody extends State<RoomViewBody> {
     _blockSub?.cancel();
     _myUserSub?.cancel();
     _roomUsersSub?.cancel();
+    _flyingSub?.cancel();
     for (var n in _focusNodes) {
       n.dispose();
     }
@@ -163,8 +171,12 @@ class _RoomViewBody extends State<RoomViewBody> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
-      setState(() => myType = snap.get('type') ?? '');
-      final mycar = snap.get('mycar') ?? '';
+      final mydata = snap.data() ?? {};
+      setState(() {
+        myType = mydata['type'] ?? '';
+        myVip = int.tryParse(mydata['vip']?.toString() ?? '0') ?? 0;
+      });
+      final mycar = mydata['mycar'] ?? '';
       if (mycar.isNotEmpty) {
         _firestore.collection('store').doc(mycar).get().then((storeSnap) {
           if (!storeSnap.exists || !mounted) return;
@@ -281,6 +293,99 @@ class _RoomViewBody extends State<RoomViewBody> {
     });
   }
 
+  /// Listens for VIP flying messages and animates new ones across the screen.
+  void _listenFlyingMessages() {
+    _flyingSub = _firestore
+        .collection('room')
+        .doc(widget.roomID)
+        .collection('flying')
+        .orderBy('timestamp', descending: true)
+        .limit(10)
+        .snapshots()
+        .listen((snap) {
+      for (final change in snap.docChanges) {
+        if (change.type != DocumentChangeType.added) continue;
+        if (!_flyingInitialized) continue; // skip backlog on first load
+        final data = change.doc.data();
+        if (data == null || !mounted) continue;
+        final id = DateTime.now().microsecondsSinceEpoch;
+        setState(() {
+          _flyingMessages.add(_FlyingMessage(
+            id: id,
+            name: data['name'] ?? '',
+            text: data['text'] ?? '',
+            vip: data['vip'] ?? 0,
+          ));
+        });
+        Future.delayed(const Duration(seconds: 6), () {
+          if (!mounted) return;
+          setState(() =>
+              _flyingMessages.removeWhere((m) => m.id == id));
+        });
+      }
+      _flyingInitialized = true;
+    });
+  }
+
+  void _sendFlyingMessage() {
+    if (myVip < 1) {
+      _showInfoDialog('ميزة VIP', 'الرسائل العائمة متاحة لأعضاء VIP فقط');
+      return;
+    }
+    final ctrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: Row(
+          children: const [
+            Text('✈️', style: TextStyle(fontSize: 18)),
+            SizedBox(width: 6),
+            Text('رسالة عائمة', style: TextStyle(color: Colors.white)),
+          ],
+        ),
+        content: TextField(
+          controller: ctrl,
+          maxLength: 80,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'اكتب رسالتك...',
+            hintStyle: const TextStyle(color: Colors.white38),
+            filled: true,
+            fillColor: Colors.white10,
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إلغاء', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _gold),
+            onPressed: () {
+              final text = ctrl.text.trim();
+              if (text.isEmpty) return;
+              _firestore
+                  .collection('room')
+                  .doc(widget.roomID)
+                  .collection('flying')
+                  .add({
+                'name': widget.username,
+                'text': text,
+                'vip': myVip,
+                'timestamp': FieldValue.serverTimestamp(),
+              });
+              Navigator.pop(context);
+            },
+            child: const Text('إرسال', style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
+  }
+
   bool get _isPrivileged =>
       MytypeInRoom == "owner" ||
       MytypeInRoom == "admin" ||
@@ -366,8 +471,16 @@ class _RoomViewBody extends State<RoomViewBody> {
                   ..onInviteAudienceToTakeSeatFailed = () {}
                   ..bottomMenuBarConfig = ZegoBottomMenuBarConfig(
                     maxCount: 6,
-                    audienceExtendButtons: [_buildGiftButton(), _buildApplauseButton()],
-                    speakerExtendButtons: [_buildGiftButton(), _buildApplauseButton()],
+                    audienceExtendButtons: [
+                      _buildGiftButton(),
+                      _buildApplauseButton(),
+                      _buildFlyingMsgButton(),
+                    ],
+                    speakerExtendButtons: [
+                      _buildGiftButton(),
+                      _buildApplauseButton(),
+                      _buildFlyingMsgButton(),
+                    ],
                     hostExtendButtons: [
                       _buildGiftButton(),
                       _buildPasswordButton(),
@@ -377,6 +490,7 @@ class _RoomViewBody extends State<RoomViewBody> {
                       _buildAnnouncementButton(),
                       _buildStopMusicButton(),
                       _buildApplauseButton(),
+                      _buildFlyingMsgButton(),
                       _buildAdminButton(),
                     ],
                     speakerButtons: [
@@ -943,6 +1057,17 @@ class _RoomViewBody extends State<RoomViewBody> {
             right: 0,
             child: _VipWelcomeBanner(entry: _vipWelcome!),
           ),
+        // Flying VIP messages
+        ..._flyingMessages.asMap().entries.map((e) => Positioned(
+              top: 110.0 + (e.key % 3) * 44,
+              left: 0,
+              right: 0,
+              child: _FlyingMessageWidget(
+                key: ValueKey(e.value.id),
+                message: e.value,
+                screenWidth: MediaQuery.of(context).size.width,
+              ),
+            )),
         // Session timer badge
         Positioned(
           bottom: 200,
@@ -1731,6 +1856,26 @@ class _RoomViewBody extends State<RoomViewBody> {
           ),
         ),
         const Text('تصفيق',
+            style: TextStyle(color: Colors.white, fontSize: 8)),
+      ],
+    );
+  }
+
+  Widget _buildFlyingMsgButton() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        CircleAvatar(
+          backgroundColor: Colors.white,
+          child: IconButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _sendFlyingMessage();
+            },
+            icon: const Icon(Icons.send, color: Colors.deepPurple),
+          ),
+        ),
+        const Text('عائمة',
             style: TextStyle(color: Colors.white, fontSize: 8)),
       ],
     );
@@ -3227,6 +3372,118 @@ class _VipWelcomeBannerState extends State<_VipWelcomeBanner>
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Flying VIP message ───
+class _FlyingMessage {
+  final int id;
+  final String name;
+  final String text;
+  final int vip;
+  const _FlyingMessage(
+      {required this.id,
+      required this.name,
+      required this.text,
+      required this.vip});
+}
+
+class _FlyingMessageWidget extends StatefulWidget {
+  final _FlyingMessage message;
+  final double screenWidth;
+  const _FlyingMessageWidget(
+      {super.key, required this.message, required this.screenWidth});
+  @override
+  State<_FlyingMessageWidget> createState() => _FlyingMessageWidgetState();
+}
+
+class _FlyingMessageWidgetState extends State<_FlyingMessageWidget>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+        vsync: this, duration: const Duration(seconds: 6));
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.linear);
+    _ctrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  List<Color> get _bubbleColors {
+    switch (widget.message.vip) {
+      case 4:
+        return [const Color(0xFFFF1744), const Color(0xFFD500F9)];
+      case 3:
+        return [const Color(0xFF8E2DE2), const Color(0xFF4A00E0)];
+      case 2:
+        return [const Color(0xFF00C6FF), const Color(0xFF0072FF)];
+      default:
+        return [const Color(0xFFFFA726), const Color(0xFFFF7043)];
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (_, child) {
+        // Travel from right edge to off the left edge.
+        final dx = widget.screenWidth -
+            (_anim.value * (widget.screenWidth + 320));
+        return Transform.translate(offset: Offset(dx, 0), child: child);
+      },
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(colors: _bubbleColors),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: _bubbleColors.first.withOpacity(0.5),
+                blurRadius: 8,
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.9),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text('VIP ${widget.message.vip}',
+                    style: const TextStyle(
+                        color: Colors.black,
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold)),
+              ),
+              const SizedBox(width: 6),
+              Text('${widget.message.name}: ',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold)),
+              Text(widget.message.text,
+                  style: const TextStyle(color: Colors.white, fontSize: 12)),
+            ],
           ),
         ),
       ),
